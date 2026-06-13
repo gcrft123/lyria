@@ -46,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindow: OnboardingWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Leave a local breadcrumb for uncaught exceptions (no SDK / network).
+        CrashReporter.install()
+
         // Hover → expand/collapse.
         let hoverHandler = HoverInteractionHandler(controller: controller)
         controller.interactionHandler = hoverHandler

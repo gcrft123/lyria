@@ -30,6 +30,14 @@ final class MusicPlayerProvider: MusicIslandProvider {
     private var pollTimer: Timer?
     private var distributedObserver: NSObjectProtocol?
 
+    /// Poll cadence. While something is PLAYING we poll fast to keep the scrubber
+    /// honest; when paused/stopped/nothing we back off, since position isn't moving
+    /// and Music's `playerInfo` notification gives an instant refresh on any change.
+    /// This keeps an idle Mac from doing cross-process IPC to Music once a second.
+    private let activeInterval: TimeInterval = 1.0
+    private let idleInterval: TimeInterval = 4.0
+    private var currentInterval: TimeInterval = 0
+
     /// Set DI_MOCK_MUSIC=1 to show a fake track (for previewing the UI without
     /// Apple Music actually playing).
     private var useMock: Bool { ProcessInfo.processInfo.environment["DI_MOCK_MUSIC"] == "1" }
@@ -45,12 +53,7 @@ final class MusicPlayerProvider: MusicIslandProvider {
         }
 
         refresh()
-
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        pollTimer = timer
+        schedulePoll(idleInterval)   // upgraded to fast by refresh() once it sees playback
 
         // Music posts this whenever the track or play state changes.
         distributedObserver = DistributedNotificationCenter.default().addObserver(
@@ -77,8 +80,24 @@ final class MusicPlayerProvider: MusicIslandProvider {
         guard !useMock else { return }
         // The read runs off the main thread; the completion is delivered on main.
         bridge.snapshot { [weak self] snapshot in
-            self?.controller?.updateNowPlaying(snapshot)
+            guard let self else { return }
+            self.controller?.updateNowPlaying(snapshot)
+            // Match the poll cadence to playback state.
+            self.schedulePoll(snapshot?.isPlaying == true ? self.activeInterval : self.idleInterval)
         }
+    }
+
+    /// (Re)arm the poll timer at `interval`, but only if the cadence actually
+    /// changed — so a steady state doesn't churn timers every tick.
+    private func schedulePoll(_ interval: TimeInterval) {
+        guard interval != currentInterval else { return }
+        currentInterval = interval
+        pollTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.refresh()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
     }
 
     private func scheduleSync(after seconds: TimeInterval = 0.35) {
