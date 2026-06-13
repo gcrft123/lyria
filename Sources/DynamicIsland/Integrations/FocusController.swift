@@ -12,8 +12,8 @@ import Foundation
 /// user-made Shortcut through the `shortcuts` CLI, so this expects two one-action
 /// shortcuts to exist (created once by the user):
 ///
-///   • "Dynamic Island DND On"  — a single "Turn Do Not Disturb On"  action
-///   • "Dynamic Island DND Off" — a single "Turn Do Not Disturb Off" action
+///   • "Lyria DND On"  — a single "Turn Do Not Disturb On"  action
+///   • "Lyria DND Off" — a single "Turn Do Not Disturb Off" action
 ///
 /// DND is turned on only once the provider confirms it can actually read the
 /// store (wired in `AppDelegate`); if Full Disk Access is missing we leave the
@@ -22,8 +22,8 @@ import Foundation
 /// (used when testing the UI without altering the real system state).
 @MainActor
 final class FocusController {
-    static let onShortcutName = "Dynamic Island DND On"
-    static let offShortcutName = "Dynamic Island DND Off"
+    static let onShortcutName = "Lyria DND On"
+    static let offShortcutName = "Lyria DND Off"
 
     private let disabled = ProcessInfo.processInfo.environment["DI_DISABLE_DND"] == "1"
     private var isOn = false

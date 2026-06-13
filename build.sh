@@ -14,7 +14,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="DynamicIsland"
+# User-facing app/bundle/executable name. (The source dir + bundle identifier keep
+# their original names so TCC grants and persisted settings survive the rebrand.)
+APP_NAME="Lyria"
 
 BUILD_DIR="$ROOT/.build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
