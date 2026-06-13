@@ -22,8 +22,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="DynamicIsland"
-VOL_NAME="Dynamic Island"
+APP_NAME="Lyria"
+VOL_NAME="Lyria"
 APP_BUNDLE="$ROOT/.build/$APP_NAME.app"
 PLIST="$ROOT/Resources/Info.plist"
 

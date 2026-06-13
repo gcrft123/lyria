@@ -48,7 +48,7 @@ struct HelloAct: View {
                 .font(.system(size: IconSize.xl, weight: .semibold))
                 .foregroundStyle(accent)
                 .scaleEffect(shown ? 1 : 0.6)
-            Text("Dynamic Island")
+            Text("Lyria")
                 .font(Typography.title)
                 .foregroundStyle(Palette.textPrimary)
             Text("This is your island. Let me show you around.")
