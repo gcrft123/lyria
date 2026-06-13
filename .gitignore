@@ -24,3 +24,8 @@ DerivedData/
 *.cer
 *.provisionprofile
 .env
+
+# Internal design / agent docs (kept out of the public repo)
+CLAUDE.md
+DESIGN_GUIDELINES.md
+ONBOARDING_DESIGN.md
