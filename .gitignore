@@ -1,0 +1,26 @@
+# Build output
+.build/
+*.dmg
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode / SwiftPM (in case a project is added later)
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+DerivedData/
+
+# Editor / tooling
+.vscode/
+*.swp
+*~
+
+# Local secrets / signing material (never commit these)
+*.p12
+*.cer
+*.provisionprofile
+.env

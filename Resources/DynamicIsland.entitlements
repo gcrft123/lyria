@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Hardened Runtime entitlements for the notarized Developer ID build.
+
+	  The app is deliberately NOT sandboxed — it needs Full Disk Access, private
+	  display/audio frameworks, and a system event tap, none of which are possible
+	  inside the App Sandbox. So this file carries only the two capabilities that
+	  Hardened Runtime gates and the app genuinely uses; everything else it needs
+	  (Accessibility, Full Disk Access, Screen Recording, Calendar, Location,
+	  Bluetooth) is granted at runtime through TCC, not here.
+	-->
+
+	<!-- Send Apple Events to Music.app via ScriptingBridge (now-playing mirroring
+	     + transport). Without this, Hardened Runtime blocks all Apple Events even
+	     with the NSAppleEventsUsageDescription string present. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
+	<!-- Core Audio process taps (CATapDescription / AudioHardwareCreateProcessTap)
+	     for the per-app volume + EQ feature, and the beat/rhythm monitor. Counts as
+	     audio capture under Hardened Runtime. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>
