@@ -49,6 +49,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Leave a local breadcrumb for uncaught exceptions (no SDK / network).
         CrashReporter.install()
 
+        // Start Sparkle's scheduled background update checks (manual check lives in
+        // Settings ▸ General). Skippable for dev/screenshots via DI_DISABLE_UPDATES=1.
+        if ProcessInfo.processInfo.environment["DI_DISABLE_UPDATES"] != "1" {
+            _ = Updater.shared
+        }
+
         // Hover → expand/collapse.
         let hoverHandler = HoverInteractionHandler(controller: controller)
         controller.interactionHandler = hoverHandler

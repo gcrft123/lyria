@@ -231,7 +231,7 @@ final class IslandWindowController: NSObject {
         // ~33 Hz: low enough to be cheap (a point read + rect test), fast enough that
         // the island reacts to the pointer arriving/leaving with no perceptible delay.
         let timer = Timer(timeInterval: 0.03, repeats: true) { [weak self] _ in
-            self?.updateHover()
+            MainActor.assumeIsolated { self?.updateHover() }
         }
         RunLoop.main.add(timer, forMode: .common)
         hoverTimer = timer

@@ -1,22 +1,30 @@
 #!/bin/bash
 #
-# make-icon.sh — render the app icon and assemble Resources/AppIcon.icns.
+# make-icon.sh — assemble Resources/AppIcon.icns from the Lyria icon artwork.
 #
-# Renders a 1024px master with Scripts/icon-render.swift, downsamples it to the
-# standard iconset sizes with sips, and packs them into an .icns with iconutil.
-# Run once (or after editing icon-render.swift); build.sh then bundles the icns.
+# Uses the 1024px master exported from Icon Composer ("Icon Exports/", the
+# Default light variant — already the macOS rounded-square shape with transparent
+# corners), downsamples it to the standard iconset sizes with sips, and packs
+# them into an .icns with iconutil. build.sh then bundles the icns. Pass a path to
+# override the master (e.g. to use a different variant).
+#
+# (The old programmatic renderer, Scripts/icon-render.swift, is superseded by the
+# Icon Composer artwork but kept for reference.)
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MASTER_SRC="${1:-$ROOT/Icon Exports/Icon-iOS-Default-1024x1024@1x.png}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 MASTER="$TMP/icon.png"
 SET="$TMP/AppIcon.iconset"
 mkdir -p "$SET"
 
-echo "==> Rendering master (1024px)"
-swift "$ROOT/Scripts/icon-render.swift" "$MASTER"
+[[ -f "$MASTER_SRC" ]] || { echo "make-icon: master not found: $MASTER_SRC" >&2; exit 1; }
+echo "==> Master: $MASTER_SRC"
+# Normalize to a clean 1024px PNG master (handles any source size/format).
+sips -s format png -z 1024 1024 "$MASTER_SRC" --out "$MASTER" >/dev/null
 
 echo "==> Building iconset"
 for s in 16 32 128 256 512; do

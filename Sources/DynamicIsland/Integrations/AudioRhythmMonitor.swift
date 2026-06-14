@@ -97,7 +97,7 @@ final class AudioRhythmMonitor {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
-    private let queue = DispatchQueue(label: "com.dynamicisland.rhythm.tap", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "io.github.gcrft123.lyria.rhythm.tap", qos: .userInteractive)
 
     /// DI_DEBUG_AUDIO=1 logs the tap pipeline's bring-up to stderr.
     private let debug = ProcessInfo.processInfo.environment["DI_DEBUG_AUDIO"] == "1"

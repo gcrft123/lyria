@@ -28,6 +28,7 @@ else
 	SDK_PATH="$(xcrun --show-sdk-path)"
 fi
 TARGET="arm64-apple-macosx13.0"
+SPARKLE_DIR="$ROOT/Vendor/Sparkle-2.9.3"   # app sources `import Sparkle`
 OUT="$ROOT/.build/DynamicIslandTests"
 mkdir -p "$ROOT/.build"
 
@@ -56,6 +57,9 @@ echo "==> Compiling ${#SOURCES[@]} files (app sources sans @main + tests)"
 	-framework IOKit \
 	-framework EventKit \
 	-framework CoreLocation \
+	-F "$SPARKLE_DIR" \
+	-framework Sparkle \
+	-Xlinker -rpath -Xlinker "$SPARKLE_DIR" \
 	-lsqlite3 \
 	-o "$OUT" \
 	"${SOURCES[@]}"

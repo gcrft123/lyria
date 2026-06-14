@@ -24,7 +24,7 @@ final class TimerManager: ObservableObject {
     init(settings: AppSettings? = nil) {
         self.settings = settings
         let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.advance()
+            MainActor.assumeIsolated { self?.advance() }
         }
         RunLoop.main.add(t, forMode: .common)
         tick = t
@@ -214,7 +214,7 @@ final class TimerManager: ObservableObject {
         // still pulses regardless — that's driven by `isRinging`, not this timer).
         guard settings?.timerChimeRepeat ?? true else { return }
         let t = Timer(timeInterval: 1.3, repeats: true) { [weak self] _ in
-            self?.playChime()
+            MainActor.assumeIsolated { self?.playChime() }
         }
         RunLoop.main.add(t, forMode: .common)
         ringTimer = t

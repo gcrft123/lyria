@@ -153,7 +153,9 @@ final class AppVolumeStore: ObservableObject {
         }
         refresh()
         applyEngine()
-        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in self?.refresh() }
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }

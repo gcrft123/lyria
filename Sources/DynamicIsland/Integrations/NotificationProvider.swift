@@ -20,7 +20,7 @@ protocol NotificationIslandProvider: IslandContentProvider {}
 
 @MainActor
 final class NotificationProvider: NotificationIslandProvider {
-    let id = "com.dynamicisland.notifications"
+    let id = "io.github.gcrft123.lyria.notifications"
 
     private weak var controller: DynamicIslandController?
 
@@ -60,7 +60,7 @@ final class NotificationProvider: NotificationIslandProvider {
     /// serial queue so the cursor (`lastRowID`) is only ever touched off-main
     /// and in order.
     private let reader = NotificationCenterReader()
-    private let readerQueue = DispatchQueue(label: "com.dynamicisland.notifications.reader")
+    private let readerQueue = DispatchQueue(label: "io.github.gcrft123.lyria.notifications.reader")
 
     private let ownBundleID = Bundle.main.bundleIdentifier
 
@@ -92,7 +92,7 @@ final class NotificationProvider: NotificationIslandProvider {
         }
 
         let timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
-            self?.poll()
+            MainActor.assumeIsolated { self?.poll() }
         }
         timer.tolerance = 0.5
         RunLoop.main.add(timer, forMode: .common)

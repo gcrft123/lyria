@@ -47,6 +47,10 @@ fi
 # Minimum supported macOS; the build machine can be newer.
 TARGET="arm64-apple-macosx13.0"
 
+# Sparkle auto-update framework (vendored, universal). `-F` puts it on the
+# framework search path so `import Sparkle` resolves; it's embedded + signed below.
+SPARKLE_DIR="$ROOT/Vendor/Sparkle-2.9.3"
+
 echo "==> Cleaning previous bundle"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
@@ -75,6 +79,9 @@ echo "==> Compiling ${#SOURCES[@]} files"
 	-framework IOKit \
 	-framework EventKit \
 	-framework CoreLocation \
+	-F "$SPARKLE_DIR" \
+	-framework Sparkle \
+	-Xlinker -rpath -Xlinker @executable_path/../Frameworks \
 	-lsqlite3 \
 	-o "$MACOS_DIR/$APP_NAME" \
 	"${SOURCES[@]}"
@@ -102,6 +109,14 @@ if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
 	cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 fi
 
+# Embed Sparkle.framework so the app can self-update. The binary links it via
+# @rpath (set at link time to @executable_path/../Frameworks). Copied fresh each
+# build since the bundle is wiped above; signed inside-out in the signing step.
+echo "==> Embedding Sparkle.framework"
+FRAMEWORKS_DIR="$APP_BUNDLE/Contents/Frameworks"
+mkdir -p "$FRAMEWORKS_DIR"
+cp -R "$SPARKLE_DIR/Sparkle.framework" "$FRAMEWORKS_DIR/"
+
 # Sign with a STABLE self-signed code-signing certificate so TCC keys its grants
 # (Full Disk Access, Accessibility) to the designated requirement — bundle ID +
 # the cert's leaf hash — which survives rebuilds. Ad-hoc (`--sign -`) keys grants
@@ -118,39 +133,75 @@ fi
 # binary ready to notarize (see Scripts/make-dmg.sh). This is the only signing
 # that runs on other people's Macs without a Gatekeeper warning. Local dev keeps
 # using the self-signed identity below (no env var set).
-ENTITLEMENTS="$ROOT/Resources/DynamicIsland.entitlements"
-if [[ -n "${DI_DEVID_IDENTITY:-}" ]]; then
-	if codesign --force --options runtime --timestamp \
-		--entitlements "$ENTITLEMENTS" \
-		--sign "$DI_DEVID_IDENTITY" "$APP_BUNDLE"; then
-		echo "    ✅ Developer ID signed + Hardened Runtime + entitlements (ready to notarize)"
-	else
-		echo "    build failed: Developer ID signing with '$DI_DEVID_IDENTITY' failed"
-		exit 1
-	fi
-else
-# Sign with a STABLE self-signed code-signing certificate so TCC keys its grants
-# (Full Disk Access, Accessibility) to the designated requirement — bundle ID +
-# the cert's leaf hash — which survives rebuilds. Ad-hoc (`--sign -`) keys grants
-# to the cdhash instead, which changes every build and wipes the grants, forcing
-# a re-grant each time. Create the cert once via Keychain Access ▸ Certificate
-# Assistant ▸ Create a Certificate (Self Signed Root, type Code Signing), then
-# grant the two permissions once and they persist. Falls back to ad-hoc (with a
-# warning) when the cert isn't on this machine, so the build still works.
+# Resolve the signing identity + flags ONCE, then sign inside-out: Sparkle's
+# nested helpers and framework first, the app last (so the app's seal covers the
+# freshly-signed framework). Two paths:
+#   • PRODUCTION — set DI_DEVID_IDENTITY to a "Developer ID Application: …"
+#     identity for a Hardened-Runtime, timestamped, entitled bundle ready to
+#     notarize (Scripts/make-dmg.sh). The only signing that runs warning-free on
+#     other Macs.
+#   • LOCAL DEV — a STABLE self-signed cert ("DynamicIsland Local" by default) so
+#     TCC keys its grants (Full Disk Access, Accessibility) to the designated
+#     requirement (bundle ID + the cert's leaf hash), which survives rebuilds.
+#     Ad-hoc (`--sign -`) keys to the cdhash instead, which changes every build
+#     and wipes grants. Create the cert once via Keychain Access ▸ Certificate
+#     Assistant ▸ Create a Certificate (Self Signed Root, type Code Signing).
 # NB: no `-v` — a self-signed cert is "not trusted" so `-v` (valid-only) hides
-# it, but it signs fine and TCC's designated requirement only checks the leaf
-# cert hash (not the trust chain), so grants still persist.
-SIGN_ID="${DI_SIGN_IDENTITY:-DynamicIsland Local}"
-if security find-identity -p codesigning 2>/dev/null | grep -qF "$SIGN_ID"; then
-	codesign --force --sign "$SIGN_ID" "$APP_BUNDLE" >/dev/null 2>&1 && \
-		echo "    signed with stable identity: $SIGN_ID (TCC grants persist)" || \
-		echo "    (codesign failed with '$SIGN_ID' — not fatal for local runs)"
+# it, but it signs fine and TCC only checks the leaf cert hash, not the chain.
+ENTITLEMENTS="$ROOT/Resources/DynamicIsland.entitlements"
+SPARKLE_FW="$FRAMEWORKS_DIR/Sparkle.framework"
+
+if [[ -n "${DI_DEVID_IDENTITY:-}" ]]; then
+	SIGN_ID="$DI_DEVID_IDENTITY"
+	HARDEN=(--options runtime --timestamp)   # required for notarization
+	SIGN_DESC="Developer ID + Hardened Runtime + entitlements (ready to notarize)"
+	SIGN_FATAL=1
 else
-	codesign --force --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
-	echo "    ⚠️  ad-hoc signed — '$SIGN_ID' not found, so FDA/Accessibility grants WILL reset."
-	echo "       Create it in Keychain Access (Certificate Assistant ▸ Create a Certificate,"
-	echo "       Self Signed Root, type Code Signing) or set DI_SIGN_IDENTITY to an existing one."
+	HARDEN=()
+	SIGN_FATAL=0
+	want="${DI_SIGN_IDENTITY:-DynamicIsland Local}"
+	if security find-identity -p codesigning 2>/dev/null | grep -qF "$want"; then
+		SIGN_ID="$want"
+		SIGN_DESC="stable identity: $want (TCC grants persist)"
+	else
+		SIGN_ID="-"
+		SIGN_DESC="ad-hoc — '$want' not found, so FDA/Accessibility grants WILL reset"
+	fi
 fi
+
+# Sparkle's helpers, deepest first (XPC services → Autoupdate → Updater.app →
+# framework). No app entitlements on these; Hardened Runtime is applied for the
+# Developer ID path so they remain notarizable.
+sv="$SPARKLE_FW/Versions/B"
+sign_fail=0
+for item in \
+	"$sv/XPCServices/Downloader.xpc" \
+	"$sv/XPCServices/Installer.xpc" \
+	"$sv/Autoupdate" \
+	"$sv/Updater.app" \
+	"$SPARKLE_FW"; do
+	codesign --force ${HARDEN[@]+"${HARDEN[@]}"} --sign "$SIGN_ID" "$item" >/dev/null 2>&1 || sign_fail=1
+done
+
+# The app last. The Developer ID path also applies the app entitlements.
+if [[ -n "${DI_DEVID_IDENTITY:-}" ]]; then
+	codesign --force ${HARDEN[@]+"${HARDEN[@]}"} --entitlements "$ENTITLEMENTS" \
+		--sign "$SIGN_ID" "$APP_BUNDLE" >/dev/null 2>&1 || sign_fail=1
+else
+	codesign --force --sign "$SIGN_ID" "$APP_BUNDLE" >/dev/null 2>&1 || sign_fail=1
+fi
+
+if [[ "$sign_fail" == "0" ]]; then
+	echo "    signed — $SIGN_DESC"
+elif [[ "$SIGN_FATAL" == "1" ]]; then
+	echo "    build failed: Developer ID signing with '$SIGN_ID' failed"
+	exit 1
+else
+	echo "    ⚠️  signing had errors ($SIGN_DESC) — usually non-fatal for local runs."
+	if [[ "$SIGN_ID" == "-" ]]; then
+		echo "       Create 'DynamicIsland Local' in Keychain Access (Certificate Assistant ▸"
+		echo "       Create a Certificate, Self Signed Root, type Code Signing) to keep grants."
+	fi
 fi
 
 echo "==> Built $APP_BUNDLE"

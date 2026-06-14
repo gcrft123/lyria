@@ -18,7 +18,7 @@ import SwiftUI
 /// main thread, so each hops back onto the main actor before touching state.
 @MainActor
 final class WiFiProvider: NSObject, IslandContentProvider, CWEventDelegate {
-    let id = "com.dynamicisland.wifi"
+    let id = "io.github.gcrft123.lyria.wifi"
 
     private weak var controller: DynamicIslandController?
     private let client = CWWiFiClient.shared()

@@ -11,7 +11,7 @@ import SwiftUI
 /// notification and the global default are both readable by any app.
 @MainActor
 final class AppearanceProvider: NSObject, IslandContentProvider {
-    let id = "com.dynamicisland.appearance"
+    let id = "io.github.gcrft123.lyriaearance"
 
     private weak var controller: DynamicIslandController?
 

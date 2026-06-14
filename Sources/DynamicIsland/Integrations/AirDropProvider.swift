@@ -15,7 +15,7 @@ import SwiftUI
 /// session.
 @MainActor
 final class AirDropProvider: IslandContentProvider {
-    let id = "com.dynamicisland.airdrop"
+    let id = "io.github.gcrft123.lyria.airdrop"
 
     private weak var controller: DynamicIslandController?
 

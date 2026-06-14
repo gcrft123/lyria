@@ -20,7 +20,7 @@ struct DeviceUsage: Equatable {
 final class PrivacyMonitor: IslandExtensionProvider {
 
     /// Stable id for the extension this provider owns.
-    let extensionID = "com.dynamicisland.privacy"
+    let extensionID = "io.github.gcrft123.lyria.privacy"
 
     /// The same orange the menu-bar recording dot uses.
     static let tint = Palette.recording
@@ -45,7 +45,7 @@ final class PrivacyMonitor: IslandExtensionProvider {
         self.controller = controller
         poll()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.poll()
+            MainActor.assumeIsolated { self?.poll() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer

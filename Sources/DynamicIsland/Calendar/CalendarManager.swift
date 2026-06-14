@@ -35,7 +35,7 @@ final class CalendarManager: ObservableObject {
     init(settings: AppSettings? = nil) {
         self.settings = settings
         let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.evaluateImminence()
+            MainActor.assumeIsolated { self?.evaluateImminence() }
         }
         RunLoop.main.add(t, forMode: .common)
         ticker = t

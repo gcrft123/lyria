@@ -81,6 +81,18 @@ final class OnboardingCoordinator: ObservableObject {
     private var previewMode = false
     private var previewBeat = 0
 
+    /// Resume-across-relaunch checkpoint. Some grants (Accessibility, Full Disk
+    /// Access) only take effect after the app is relaunched, so a user who quits
+    /// mid-onboarding to grant one is brought back to the same screen instead of
+    /// restarting from the top. We persist the current phase + sub-step and resume
+    /// from it on the next launch; it's cleared once onboarding finishes.
+    private let progressStore = UserDefaults.standard
+    private enum Progress {
+        static let phase = "onboarding.phase"
+        static let permissionIndex = "onboarding.permissionIndex"
+        static let trailerBeat = "onboarding.trailerBeat"
+    }
+
     init(settings: AppSettings) {
         self.settings = settings
     }
@@ -110,6 +122,8 @@ final class OnboardingCoordinator: ObservableObject {
             previewMode = true
             previewBeat = Int(ProcessInfo.processInfo.environment["DI_ONBOARD_BEAT"] ?? "") ?? 0
             enter(phase)
+        } else if let resumed = savedResumePhase() {
+            resume(to: resumed)
         } else {
             enter(.awakening)
         }
@@ -132,8 +146,47 @@ final class OnboardingCoordinator: ObservableObject {
 
     private func tearDown() {
         audio.stop()
+        clearProgress()
         settings.onboardingCompleted = true
         onFinish?()
+    }
+
+    // MARK: Resume across relaunch
+
+    /// The phase to resume into, or nil for a normal fresh start. We never resume
+    /// the auto-advancing awakening pre-roll (a quit there just restarts cleanly).
+    private func savedResumePhase() -> OnboardingPhase? {
+        guard progressStore.object(forKey: Progress.phase) != nil,
+              let phase = OnboardingPhase(rawValue: progressStore.integer(forKey: Progress.phase)),
+              phase != .awakening else { return nil }
+        return phase
+    }
+
+    /// Jump straight to a saved phase, restoring its sub-step (which permission /
+    /// trailer beat) so the user lands exactly where they left off.
+    private func resume(to phase: OnboardingPhase) {
+        cancelTimer()
+        onPermissionFocus?(false)
+        permissionIndex = min(max(0, progressStore.integer(forKey: Progress.permissionIndex)),
+                              max(0, permissions.count - 1))
+        trailerBeat = min(max(0, progressStore.integer(forKey: Progress.trailerBeat)),
+                          TrailerBeat.allCases.count - 1)
+        withAnimation(reduceMotion ? Motion.reduced : Motion.morph) { self.phase = phase }
+    }
+
+    /// Checkpoint the current position. Skipped for the preview/debug modes and the
+    /// awakening pre-roll (nothing worth resuming into there).
+    private func saveProgress() {
+        guard !previewMode, phase != .awakening else { return }
+        progressStore.set(phase.rawValue, forKey: Progress.phase)
+        progressStore.set(permissionIndex, forKey: Progress.permissionIndex)
+        progressStore.set(trailerBeat, forKey: Progress.trailerBeat)
+    }
+
+    private func clearProgress() {
+        progressStore.removeObject(forKey: Progress.phase)
+        progressStore.removeObject(forKey: Progress.permissionIndex)
+        progressStore.removeObject(forKey: Progress.trailerBeat)
     }
 
     // MARK: Phase machine
@@ -155,6 +208,7 @@ final class OnboardingCoordinator: ObservableObject {
         case .hello, .personalize, .tryMe, .finale:
             break   // user-paced
         }
+        saveProgress()
     }
 
     /// Manual "Continue" from the user-paced acts.
@@ -177,6 +231,7 @@ final class OnboardingCoordinator: ObservableObject {
             enter(.permissions)
         } else {
             withAnimation(reduceMotion ? Motion.reduced : Motion.contentMorph) { trailerBeat += 1 }
+            saveProgress()
         }
     }
 
@@ -208,6 +263,7 @@ final class OnboardingCoordinator: ObservableObject {
         withAnimation(reduceMotion ? Motion.reduced : Motion.transition) {
             permissionIndex += 1
         }
+        saveProgress()
     }
 
     var isLastPermission: Bool { permissionIndex + 1 >= permissions.count }

@@ -12,7 +12,7 @@ import SwiftUI
 /// here touches the store.
 @MainActor
 final class EventKitProvider: IslandContentProvider {
-    let id = "com.dynamicisland.calendar"
+    let id = "io.github.gcrft123.lyria.calendar"
 
     private weak var controller: DynamicIslandController?
     private let store = EKEventStore()
