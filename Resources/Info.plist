@@ -10,7 +10,7 @@
 	     decide on a permanent Lyria-branded reverse-DNS id. Changing it resets the
 	     user's TCC grants + persisted settings, so it's a one-time pre-launch call. -->
 	<key>CFBundleIdentifier</key>
-	<string>com.dynamicisland.app</string>
+	<string>io.github.gcrft123.lyria</string>
 	<key>CFBundleExecutable</key>
 	<string>Lyria</string>
 	<key>CFBundleIconFile</key>
@@ -34,6 +34,8 @@
 	     SUPublicEDKey is added when the EdDSA keypair is generated. -->
 	<key>SUFeedURL</key>
 	<string>https://gcrft123.github.io/lyria/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>1JukJVj+NcHUUdtu6/h3sSL65OrCtSVHDOMfIZYEQWE=</string>
 	<!-- Required so macOS can prompt for permission to mirror & control Music. -->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Lyria shows and controls what’s playing in Apple Music.</string>

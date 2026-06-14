@@ -226,7 +226,37 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.islandFlat)
+
+            Rectangle().fill(Palette.hairlineStroke).frame(height: 1)
+
+            Button {
+                Updater.shared.checkForUpdates()
+            } label: {
+                HStack(spacing: 0) {
+                    rowLabel("Check for Updates", systemImage: "arrow.down.circle")
+                    Spacer(minLength: Spacing.md)
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: IconSize.md))
+                        .foregroundStyle(accent)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.islandFlat)
+
+            Text(appVersionLine)
+                .font(Typography.footnote)
+                .foregroundStyle(Palette.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// "Lyria 0.1.0 (1)" from the bundle, for the General page footer.
+    private var appVersionLine: String {
+        let info = Bundle.main.infoDictionary
+        let name = info?["CFBundleName"] as? String ?? "Lyria"
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(name) \(version) (\(build))"
     }
 
     private var musicControls: some View {

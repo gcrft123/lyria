@@ -4,12 +4,13 @@ import CoreAudio
 import CoreGraphics
 import Foundation
 import ObjectiveC
+import os
 
 /// Lightweight diagnostic log for the HUD / brightness path, written to
 /// `/tmp/di_hud_debug.log`. Gated on the `DIDebugHUD` user default (read once),
 /// NOT an env var, so it works for the normal `open`-launched app where TCC
 /// grants live (env vars aren't forwarded through LaunchServices). Enable with:
-///   `defaults write com.dynamicisland.app DIDebugHUD -bool YES`
+///   `defaults write io.github.gcrft123.lyria DIDebugHUD -bool YES`
 /// then relaunch. Safe to call from any thread.
 enum HUDDebug {
     static let enabled = UserDefaults.standard.bool(forKey: "DIDebugHUD")
@@ -51,14 +52,26 @@ enum HUDDebug {
 @MainActor
 final class SystemHUDProvider: IslandContentProvider {
 
-    let id = "com.dynamicisland.hud"
+    let id = "io.github.gcrft123.lyria.hud"
 
     private weak var controller: DynamicIslandController?
 
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    /// The media-key session tap, serviced off the main runloop (see `EventTap`).
+    private var tap: EventTap?
     private var retryTimer: Timer?
-    private var didPrompt = false
+
+    /// Thread-safe mirrors of "is there controllable brightness / keyboard-backlight
+    /// hardware here", read by the off-main tap callback so it can decide whether to
+    /// swallow the brightness / illumination keys WITHOUT touching the main actor
+    /// (probing DDC or CoreBrightness on the tap thread would stall system input).
+    /// Refreshed on the main thread at install and whenever one of those keys is
+    /// seen — so at worst the first press right after a monitor hot-plug passes
+    /// through to the system, then self-corrects. Volume / mute need no mirror
+    /// (always ours).
+    private nonisolated let brightnessControllable = OSAllocatedUnfairLock(initialState: false)
+    private nonisolated let keyboardBacklightControllable = OSAllocatedUnfairLock(initialState: false)
+    /// Debounce so a held key doesn't re-probe DDC every pulse.
+    private var lastCapabilityRefresh: TimeInterval = 0
 
     /// External-display brightness over DDC/CI (MonitorControl-style). Built-in
     /// panels still go through DisplayServices; this only kicks in when the key
@@ -161,14 +174,8 @@ final class SystemHUDProvider: IslandContentProvider {
     func stopObserving() {
         retryTimer?.invalidate()
         retryTimer = nil
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-        runLoopSource = nil
-        eventTap = nil
+        tap?.disable()
+        tap = nil
     }
 
     // MARK: Hold acceleration
@@ -204,21 +211,18 @@ final class SystemHUDProvider: IslandContentProvider {
     // MARK: Event tap
 
     private func installTap() {
-        guard eventTap == nil else { return }
+        guard tap == nil else { return }
 
-        // Need Accessibility to create a session tap. Prompt once, then poll
-        // until the user grants it (the tap can't be created before then).
+        // Need Accessibility to create a session tap. We DON'T prompt here —
+        // onboarding owns the Accessibility ask (it deep-links to the pane), and a
+        // second system "would like to control…" alert at launch is redundant. Just
+        // poll silently until it's granted, then the tap comes up on the next tick.
         guard AXIsProcessTrusted() else {
-            if !didPrompt {
-                didPrompt = true
-                let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-                _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
-                FileHandle.standardError.write(Data(
-                    "DynamicIsland: grant Accessibility (System Settings ▸ Privacy & Security ▸ Accessibility) so the island can replace the system volume/brightness HUD.\n".utf8))
-            }
             scheduleRetry()
             return
         }
+
+        refreshCapabilityMirrors(force: true)
 
         // NSSystemDefined is event type 14; media keys arrive on this stream.
         // Watch BOTH NSSystemDefined (type 14, media keys: volume/mute) AND plain
@@ -230,25 +234,24 @@ final class SystemHUDProvider: IslandContentProvider {
         // (Holding a key just produces a stream of these keyDowns, so we ride
         // the OS's own auto-repeat — no key-up tracking needed.)
         let mask = CGEventMask(1 << 10) | CGEventMask(1 << 14)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: Self.tapCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque())
-        else {
+        let tap = EventTap(mask: mask) { [weak self] type, event in
+            self?.handleTap(type: type, event: event) ?? false
+        }
+        tap.onStandDown = { [weak self] in self?.tapStoodDown() }
+        guard tap.enable() else {
             scheduleRetry()
             return
         }
-
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        eventTap = tap
-        runLoopSource = source
+        self.tap = tap
         retryTimer?.invalidate()
         retryTimer = nil
+    }
+
+    /// Accessibility was revoked while running — drop the dead tap and wait for
+    /// the grant to return (then rebuild).
+    private func tapStoodDown() {
+        tap = nil
+        scheduleRetry()
     }
 
     private func scheduleRetry() {
@@ -260,9 +263,17 @@ final class SystemHUDProvider: IslandContentProvider {
         retryTimer = timer
     }
 
-    /// macOS disables a tap that times out or is interrupted; turn it back on.
-    fileprivate func reenableTap() {
-        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+    /// Recompute which brightness / keyboard-backlight hardware we can drive, into
+    /// the thread-safe mirrors the tap callback reads. Debounced so a held key
+    /// doesn't re-probe DDC every pulse.
+    private func refreshCapabilityMirrors(force: Bool = false) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if !force, now - lastCapabilityRefresh < 1.0 { return }
+        lastCapabilityRefresh = now
+        let canBrightness = brightnessTarget() != nil
+        let canKeyboard = KeyboardBacklight.isAvailable
+        brightnessControllable.withLock { $0 = canBrightness }
+        keyboardBacklightControllable.withLock { $0 = canKeyboard }
     }
 
     /// Apply the adjustment for one of our keys and present the island HUD.
@@ -503,55 +514,73 @@ final class SystemHUDProvider: IslandContentProvider {
 
     // MARK: C tap callback
 
-    /// Static so it carries no captured state — context comes via `userInfo`.
-    /// Runs on the main run loop (where we add the source), so hopping onto the
-    /// main actor with `assumeIsolated` is safe.
-    private static let tapCallback: CGEventTapCallBack = { _, type, event, userInfo in
-        guard let userInfo else { return Unmanaged.passUnretained(event) }
-        let provider = Unmanaged<SystemHUDProvider>.fromOpaque(userInfo).takeUnretainedValue()
-
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            MainActor.assumeIsolated { provider.reenableTap() }
-            return Unmanaged.passUnretained(event)
-        }
-
+    /// Runs on the EVENT-TAP THREAD. Decides whether to swallow the key — from the
+    /// event and the thread-safe capability mirrors only, never touching the main
+    /// actor — and dispatches the actual hardware work (DDC, CoreAudio, the HUD)
+    /// to the main actor asynchronously, so this returns promptly and never stalls
+    /// system input.
+    nonisolated private func handleTap(type: CGEventType, event: CGEvent) -> Bool {
         // Plain keyDown stream: on Macs with no built-in display the brightness
         // keys never become a subtype-8 media key — instead they arrive HERE as
-        // F14 (107, dimmer) / F15 (113, brighter) keyDowns with the Fn flag set
-        // (this is what "Apple native keyboard access" relies on). Catch those,
-        // drive the external monitor over DDC, and swallow the key so it doesn't
-        // reach apps as a stray F14/F15.
+        // F14 (107, dimmer) / F15 (113, brighter) keyDowns with the Fn flag set.
         if type.rawValue == 10 {
             let keycode = event.getIntegerValueField(.keyboardEventKeycode)
             let isFn = event.flags.contains(.maskSecondaryFn)
-            if isFn, keycode == 107 || keycode == 113 {
-                // Ride each F14/F15 keyDown so holding F1/F2 keeps changing the
-                // external monitor's brightness (smoothed once the OS repeats).
-                let up = keycode == 113
-                let handled = MainActor.assumeIsolated {
-                    provider.handleExternalBrightnessKey(up: up)
+            guard isFn, keycode == 107 || keycode == 113 else { return false }
+            let controllable = brightnessControllable.withLock { $0 }
+            let up = keycode == 113
+            // Hop to main to drive the monitor (only if we can) and refresh the
+            // capability mirror so it tracks monitor hot-plugs.
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if controllable { _ = self.handleExternalBrightnessKey(up: up) }
+                    self.refreshCapabilityMirrors()
                 }
-                return handled ? nil : Unmanaged.passUnretained(event)
             }
-            return Unmanaged.passUnretained(event)
+            return controllable
         }
 
         // Only NSSystemDefined (14) subtype-8 media-key events are of interest
-        // (volume up/down/mute; brightness comes via the keyDown path above).
+        // (volume up/down/mute, plus brightness/illumination on built-in keyboards).
         guard type.rawValue == 14, let nsEvent = NSEvent(cgEvent: event),
               nsEvent.subtype.rawValue == 8
-        else { return Unmanaged.passUnretained(event) }
+        else { return false }
 
         let data1 = nsEvent.data1
         let keyCode = Int32((data1 & 0xFFFF_0000) >> 16)
         let keyFlags = data1 & 0x0000_FFFF
-        let keyState = (keyFlags & 0xFF00) >> 8
-        let isDown = keyState == 0x0A
+        let isDown = ((keyFlags & 0xFF00) >> 8) == 0x0A
 
-        let consumed = MainActor.assumeIsolated {
-            provider.handle(keyCode: keyCode, isDown: isDown)
+        // Swallow decision straight from the cached mirrors (lock-free, no main
+        // hop). Volume / mute are always ours; brightness / illumination only when
+        // there's hardware we can drive.
+        let swallow: Bool
+        let refreshAfter: Bool
+        switch keyCode {
+        case soundUp, soundDown, mute:
+            swallow = true;  refreshAfter = false
+        case brightnessUp, brightnessDown:
+            swallow = brightnessControllable.withLock { $0 };  refreshAfter = true
+        case illuminationUp, illuminationDown, illuminationToggle:
+            swallow = keyboardBacklightControllable.withLock { $0 };  refreshAfter = true
+        default:
+            return false   // not one of ours (e.g. play/pause) — pass straight through
         }
-        return consumed ? nil : Unmanaged.passUnretained(event)
+
+        // Do the work on the main actor. For brightness / illumination we hop even
+        // when NOT swallowing, so a stale "no hardware" mirror self-corrects after
+        // a hot-plug (the next press then swallows correctly).
+        if swallow || refreshAfter {
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if swallow { _ = self.handle(keyCode: keyCode, isDown: isDown) }
+                    if refreshAfter { self.refreshCapabilityMirrors() }
+                }
+            }
+        }
+        return swallow
     }
 
     // MARK: CoreAudio (volume)

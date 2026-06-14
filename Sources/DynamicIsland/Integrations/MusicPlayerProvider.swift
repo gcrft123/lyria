@@ -23,7 +23,7 @@ protocol MusicIslandProvider: IslandContentProvider {
 /// instantly instead of waiting for the next poll.
 @MainActor
 final class MusicPlayerProvider: MusicIslandProvider {
-    let id = "com.dynamicisland.music"
+    let id = "io.github.gcrft123.lyria.music"
 
     private weak var controller: DynamicIslandController?
     private let bridge = MusicBridge()
@@ -61,7 +61,7 @@ final class MusicPlayerProvider: MusicIslandProvider {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refresh()
+            MainActor.assumeIsolated { self?.refresh() }
         }
     }
 
@@ -94,7 +94,7 @@ final class MusicPlayerProvider: MusicIslandProvider {
         currentInterval = interval
         pollTimer?.invalidate()
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            self?.refresh()
+            MainActor.assumeIsolated { self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer

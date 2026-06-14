@@ -19,7 +19,7 @@ final class MusicBridge: @unchecked Sendable {
 
     /// Serial queue that owns the SBApplication + caches; keeps the synchronous
     /// Apple Events off the main thread.
-    private let queue = DispatchQueue(label: "com.dynamicisland.music.io")
+    private let queue = DispatchQueue(label: "io.github.gcrft123.lyria.music.io")
 
     private var cachedApp: SBApplication?
 

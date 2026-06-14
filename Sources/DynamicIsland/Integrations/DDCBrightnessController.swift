@@ -74,7 +74,7 @@ final class DDCBrightnessController {
     private var audioMax: [CGDirectDisplayID: Int] = [:]
 
     /// Serial queue for the (slow, blocking) I2C writes.
-    private let ioQueue = DispatchQueue(label: "com.dynamicisland.ddc")
+    private let ioQueue = DispatchQueue(label: "io.github.gcrft123.lyria.ddc")
 
     init() {
         // Re-map when displays are plugged/unplugged or rearranged.

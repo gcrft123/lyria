@@ -13,7 +13,7 @@ import SwiftUI
 /// required.
 @MainActor
 final class DisplayProvider: NSObject, IslandContentProvider {
-    let id = "com.dynamicisland.display"
+    let id = "io.github.gcrft123.lyria.display"
 
     private weak var controller: DynamicIslandController?
 

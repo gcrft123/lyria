@@ -3,7 +3,7 @@ import SwiftUI
 
 extension Notification.Name {
     /// Posted (e.g. by Settings → "Replay intro") to re-run onboarding live.
-    static let replayOnboarding = Notification.Name("com.dynamicisland.replayOnboarding")
+    static let replayOnboarding = Notification.Name("io.github.gcrft123.lyria.replayOnboarding")
 }
 
 /// A borderless onboarding window. The real takeover becomes key (so its buttons

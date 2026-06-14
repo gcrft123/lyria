@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 
 /// The Alt+Tab window-switcher state machine.
 ///
@@ -14,6 +15,17 @@ final class WindowSwitcher: ObservableObject {
     @Published private(set) var isActive = false
     @Published private(set) var windows: [WindowInfo] = []
     @Published private(set) var selectedIndex = 0
+
+    /// Thread-safe mirror of `isActive`, read by the off-main event-tap callback
+    /// so it can decide whether to swallow the arrow / Escape keys without hopping
+    /// to the main actor (which would stall system input). Kept in lock-step with
+    /// `isActive` via `setActive(_:)`.
+    nonisolated let activeFlag = OSAllocatedUnfairLock(initialState: false)
+
+    private func setActive(_ active: Bool) {
+        isActive = active
+        activeFlag.withLock { $0 = active }
+    }
 
     /// The currently highlighted window, if any.
     var selected: WindowInfo? {
@@ -34,7 +46,7 @@ final class WindowSwitcher: ObservableObject {
         generation += 1
         windows = list
         selectedIndex = list.count > 1 ? 1 : 0
-        if !isActive { isActive = true }
+        if !isActive { setActive(true) }
         loadThumbnails(for: list, generation: generation)
     }
 
@@ -114,7 +126,7 @@ final class WindowSwitcher: ObservableObject {
     }
 
     private func end() {
-        isActive = false
+        setActive(false)
         // Keep `windows` so the overlay can fade out cleanly; cleared on next begin.
     }
 
@@ -144,6 +156,6 @@ final class WindowSwitcher: ObservableObject {
                        icon: sym("globe"), thumbnail: nil),
         ]
         selectedIndex = 0
-        isActive = true
+        setActive(true)
     }
 }

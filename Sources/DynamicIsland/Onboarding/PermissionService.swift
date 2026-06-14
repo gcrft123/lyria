@@ -115,9 +115,10 @@ final class PermissionService: ObservableObject {
     func request(_ permission: OnboardingPermission) {
         switch permission {
         case .accessibility:
-            // Prompts with the "Open System Settings" alert, then deep-links.
-            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-            _ = AXIsProcessTrustedWithOptions(opts as CFDictionary)
+            // Deep-link straight to the Accessibility pane. We deliberately skip
+            // the system "would like to control…" alert (AXIsProcessTrustedWith-
+            // Options prompt) — it's redundant with opening the exact pane, and
+            // its own "Open System Settings" button just lands in the same place.
             openSettings(permission)
         case .calendar:
             let store = EKEventStore()

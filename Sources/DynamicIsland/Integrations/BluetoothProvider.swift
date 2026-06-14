@@ -15,7 +15,7 @@ import SwiftUI
 /// classic-BT device API, not CoreBluetooth scanning.
 @MainActor
 final class BluetoothProvider: NSObject, IslandContentProvider {
-    let id = "com.dynamicisland.bluetooth"
+    let id = "io.github.gcrft123.lyria.bluetooth"
 
     private weak var controller: DynamicIslandController?
 

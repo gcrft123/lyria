@@ -2,6 +2,15 @@
 .build/
 *.dmg
 
+# Release archives (uploaded to GitHub Releases, never committed)
+dist/
+
+# Sparkle: vendor only the framework + CLI tools (needed to build & cut releases);
+# skip the download tarball, debug symbols, and bundled test app (large, unused).
+Vendor/*.tar.xz
+Vendor/Sparkle-2.9.3/Symbols/
+Vendor/Sparkle-2.9.3/Sparkle Test App.app/
+
 # macOS
 .DS_Store
 .AppleDouble

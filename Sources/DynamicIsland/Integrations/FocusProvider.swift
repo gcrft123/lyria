@@ -23,7 +23,7 @@ import SwiftUI
 ///     mirrored.
 @MainActor
 final class FocusProvider: IslandContentProvider {
-    let id = "com.dynamicisland.focus"
+    let id = "io.github.gcrft123.lyria.focus"
 
     private weak var controller: DynamicIslandController?
     /// The app's own DND controller, so we can tell apart the Focus the *user*
@@ -31,7 +31,7 @@ final class FocusProvider: IslandContentProvider {
     private weak var focusController: FocusController?
 
     private var watchers: [FileWatcher] = []
-    private let watchQueue = DispatchQueue(label: "com.dynamicisland.focus.watch")
+    private let watchQueue = DispatchQueue(label: "io.github.gcrft123.lyria.focus.watch")
     private var debounce: DispatchWorkItem?
 
     /// Active mode identifier last observed (nil = no Focus active), so banners

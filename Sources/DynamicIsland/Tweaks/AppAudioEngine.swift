@@ -114,7 +114,7 @@ final class AppAudioEngine {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var currentSet: [pid_t] = []
-    private let queue = DispatchQueue(label: "com.dynamicisland.appaudio.tap", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "io.github.gcrft123.lyriaaudio.tap", qos: .userInitiated)
 
     private let debug = ProcessInfo.processInfo.environment["DI_DEBUG_AUDIO"] == "1"
     private func log(_ m: @autoclosure () -> String) {
