@@ -54,9 +54,9 @@ if [[ -f "$ARCHIVE" ]]; then
 	echo "    note: $ARCHIVE already exists — it will be overwritten."
 fi
 
-# generate_appcast reads the EdDSA private key from the login keychain. If it's
-# missing, the release can't be signed and updates would be rejected by clients.
-if ! "$SPARKLE_BIN/sign_update" --version >/dev/null 2>&1; then
+# generate_appcast (which signs each archive with the EdDSA private key from the
+# login keychain) and sign_update must both be present and executable.
+if [[ ! -x "$SPARKLE_BIN/generate_appcast" || ! -x "$SPARKLE_BIN/sign_update" ]]; then
 	echo "    build failed: Sparkle tools not found at $SPARKLE_BIN" >&2
 	exit 1
 fi

@@ -3,51 +3,218 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Lyria</title>
+	<title>Lyria — a living island for your Mac</title>
+	<meta name="description" content="Lyria turns the notch on your Mac into a living island: music, calendar, weather, timers, a window switcher, per-app audio, and more. Everything stays on your Mac.">
+	<meta property="og:title" content="Lyria">
+	<meta property="og:description" content="A living island for your Mac — music, calendar, weather, timers, and more, right at the notch.">
+	<meta property="og:image" content="https://gcrft123.github.io/lyria/icon.png">
 	<style>
-		:root { color-scheme: dark; }
+		:root {
+			color-scheme: dark;
+			--bg: #07070b;
+			--panel: rgba(255,255,255,0.04);
+			--border: rgba(255,255,255,0.08);
+			--text: #f4f4f7;
+			--muted: rgba(244,244,247,0.6);
+			--faint: rgba(244,244,247,0.38);
+			--accent: #a78bfa;
+			--accent-2: #6d5bd0;
+		}
 		* { margin: 0; padding: 0; box-sizing: border-box; }
+		html { scroll-behavior: smooth; }
 		body {
 			font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-			background: #000;
-			color: #fff;
-			min-height: 100vh;
-			display: flex;
-			align-items: center;
-			justify-content: center;
+			background: var(--bg);
+			color: var(--text);
+			line-height: 1.6;
+			-webkit-font-smoothing: antialiased;
+			overflow-x: hidden;
+		}
+		a { color: var(--accent); text-decoration: none; }
+		a:hover { text-decoration: underline; }
+		.wrap { max-width: 60rem; margin: 0 auto; padding: 0 1.5rem; }
+		.section { padding: 5rem 0; }
+
+		/* Hero */
+		.hero {
+			position: relative;
 			text-align: center;
-			padding: 2rem;
+			padding: 6rem 1.5rem 5rem;
+			overflow: hidden;
 		}
-		.wrap { max-width: 32rem; }
-		.pill {
-			width: 140px; height: 38px;
-			margin: 0 auto 2.5rem;
-			background: #111;
-			border-radius: 19px;
-			box-shadow: 0 0 40px rgba(120, 110, 250, 0.25);
+		.hero::before {
+			content: ""; position: absolute; inset: 0;
+			background: radial-gradient(60% 50% at 50% 0%, rgba(120,90,230,0.22), transparent 70%);
+			pointer-events: none;
 		}
-		h1 { font-size: 2.5rem; font-weight: 600; letter-spacing: -0.02em; }
-		p.tagline { margin-top: 0.75rem; color: rgba(255,255,255,0.6); font-size: 1.05rem; }
-		a.download {
-			display: inline-block;
-			margin-top: 2.5rem;
-			padding: 0.75rem 1.75rem;
-			background: #fff;
-			color: #000;
-			text-decoration: none;
-			border-radius: 12px;
-			font-weight: 600;
+		.hero-icon {
+			width: 128px; height: 128px; margin: 0 auto 1.75rem;
+			border-radius: 28px;
+			box-shadow: 0 20px 60px rgba(120,90,230,0.35);
+			position: relative;
 		}
-		p.note { margin-top: 1.5rem; font-size: 0.85rem; color: rgba(255,255,255,0.35); }
+		h1 { font-size: clamp(2.6rem, 7vw, 4rem); font-weight: 700; letter-spacing: -0.03em; }
+		.tagline {
+			margin: 0.75rem auto 0; max-width: 34rem;
+			font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--muted);
+		}
+		.cta {
+			display: inline-flex; align-items: center; gap: 0.5rem;
+			margin-top: 2.25rem; padding: 0.85rem 2rem;
+			background: linear-gradient(180deg, #fff, #e9e9ef);
+			color: #111; font-weight: 650; font-size: 1.05rem;
+			border-radius: 14px; transition: transform 0.15s ease, box-shadow 0.15s ease;
+			box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+		}
+		.cta:hover { transform: translateY(-2px); text-decoration: none; box-shadow: 0 12px 36px rgba(120,90,230,0.4); }
+		.sysreq { margin-top: 1.25rem; font-size: 0.85rem; color: var(--faint); letter-spacing: 0.01em; }
+
+		/* Section headings */
+		h2 { font-size: clamp(1.6rem, 4vw, 2.1rem); font-weight: 650; letter-spacing: -0.02em; }
+		.section > .wrap > h2 { margin-bottom: 0.5rem; }
+		.lede { color: var(--muted); max-width: 38rem; margin-bottom: 2.5rem; }
+
+		/* Feature grid */
+		.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+		.card {
+			background: var(--panel); border: 1px solid var(--border);
+			border-radius: 16px; padding: 1.5rem;
+		}
+		.card .ico { color: var(--accent); height: 30px; display: flex; align-items: center; }
+		.card .ico svg { width: 28px; height: 28px; display: block; }
+		.card h3 { font-size: 1.05rem; font-weight: 620; margin: 0.85rem 0 0.4rem; }
+		.card p { color: var(--muted); font-size: 0.95rem; }
+
+		/* Steps */
+		.steps { counter-reset: step; display: grid; gap: 1rem; max-width: 40rem; }
+		.step {
+			display: flex; gap: 1rem; align-items: flex-start;
+			background: var(--panel); border: 1px solid var(--border);
+			border-radius: 14px; padding: 1.1rem 1.25rem;
+		}
+		.step::before {
+			counter-increment: step; content: counter(step);
+			flex: 0 0 1.9rem; height: 1.9rem; border-radius: 50%;
+			display: grid; place-items: center; font-weight: 700; font-size: 0.95rem;
+			background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #fff;
+		}
+		.step p { color: var(--muted); }
+		.step strong { color: var(--text); font-weight: 600; }
+		.callout {
+			margin-top: 1.25rem; max-width: 40rem;
+			border-left: 3px solid var(--accent);
+			background: rgba(167,139,250,0.08);
+			border-radius: 0 12px 12px 0; padding: 0.9rem 1.1rem;
+			font-size: 0.92rem; color: var(--muted);
+		}
+
+		/* Centered "Install the beta" section (step rows keep their text left). */
+		#install .wrap { text-align: center; }
+		#install .lede { margin-inline: auto; }
+		#install .steps { margin-inline: auto; text-align: left; }
+		#install .callout { margin-inline: auto; text-align: left; }
+
+		/* Privacy */
+		.privacy .wrap { max-width: 46rem; }
+		.privacy p { color: var(--muted); margin-bottom: 1rem; }
+		.privacy strong { color: var(--text); }
+		.privacy ul { list-style: none; margin: 1.25rem 0; display: grid; gap: 0.6rem; }
+		.privacy li { color: var(--muted); padding-left: 1.6rem; position: relative; }
+		.privacy li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+
+		/* Footer */
+		footer { border-top: 1px solid var(--border); padding: 2.5rem 1.5rem; text-align: center; color: var(--faint); font-size: 0.85rem; }
+		footer a { color: var(--muted); }
+		.divider { height: 1px; background: var(--border); max-width: 60rem; margin: 0 auto; }
 	</style>
 </head>
 <body>
-	<div class="wrap">
-		<div class="pill"></div>
+
+	<header class="hero">
+		<img class="hero-icon" src="icon.png" alt="Lyria app icon" width="128" height="128">
 		<h1>Lyria</h1>
 		<p class="tagline">A living island for your Mac — music, calendar, weather, timers, and more, right at the notch.</p>
-		<a class="download" href="https://github.com/gcrft123/lyria/releases/latest">Download for macOS</a>
-		<p class="note">Apple Silicon · macOS 13+ · auto-updates via Sparkle</p>
-	</div>
+		<a class="cta" href="https://github.com/gcrft123/lyria/releases/latest">Download for macOS</a>
+		<p class="sysreq">Apple Silicon · macOS 13 Ventura or later · free · auto-updates</p>
+	</header>
+
+	<div class="divider"></div>
+
+	<section class="section" id="features">
+		<div class="wrap">
+			<h2>One island, many apps</h2>
+			<p class="lede">Lyria grows out of the notch and quietly hosts the things you reach for most.</p>
+			<div class="grid">
+				<div class="card">
+					<div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m10.09 11.963l9.274-3.332v5.54a3.8 3.8 0 0 0-1.91-.501c-1.958 0-3.545 1.426-3.545 3.185s1.587 3.185 3.545 3.185c1.959 0 3.546-1.426 3.546-3.185V7.492c0-1.12 0-2.059-.088-2.807a7 7 0 0 0-.043-.31c-.084-.51-.234-.988-.522-1.386a2.2 2.2 0 0 0-.676-.617l-.009-.005c-.771-.461-1.639-.428-2.532-.224c-.864.198-1.936.6-3.25 1.095l-2.284.859c-.615.231-1.137.427-1.547.63c-.435.216-.81.471-1.092.851c-.281.38-.398.79-.452 1.234c-.05.418-.05.926-.05 1.525v7.794a3.8 3.8 0 0 0-1.91-.501C4.587 15.63 3 17.056 3 18.815S4.587 22 6.545 22c1.959 0 3.546-1.426 3.546-3.185z"/></svg></div>
+					<h3>Now Playing</h3>
+					<p>Mirror and control Apple Music from the notch, with an album-art glow that pulses to the beat.</p>
+				</div>
+				<div class="card">
+					<div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 6.5c0-2.121 0-3.182.659-3.841S4.379 2 6.5 2s3.182 0 3.841.659S11 4.379 11 6.5s0 3.182-.659 3.841S8.621 11 6.5 11s-3.182 0-3.841-.659S2 8.621 2 6.5m11 11c0-2.121 0-3.182.659-3.841S15.379 13 17.5 13s3.182 0 3.841.659S22 15.379 22 17.5s0 3.182-.659 3.841S19.621 22 17.5 22s-3.182 0-3.841-.659S13 19.621 13 17.5m-11 0c0-2.121 0-3.182.659-3.841S4.379 13 6.5 13s3.182 0 3.841.659S11 15.379 11 17.5s0 3.182-.659 3.841S8.621 22 6.5 22s-3.182 0-3.841-.659S2 19.621 2 17.5m11-11c0-2.121 0-3.182.659-3.841S15.379 2 17.5 2s3.182 0 3.841.659S22 4.379 22 6.5s0 3.182-.659 3.841S19.621 11 17.5 11s-3.182 0-3.841-.659S13 8.621 13 6.5"/></svg></div>
+					<h3>Window Switcher</h3>
+					<p>Press ⌥Tab to fan out every open window across your Mac and jump straight to one.</p>
+				</div>
+				<div class="card">
+					<div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7.75 2.5a.75.75 0 0 0-1.5 0v1.58c-1.44.115-2.384.397-3.078 1.092c-.695.694-.977 1.639-1.093 3.078h19.842c-.116-1.44-.398-2.384-1.093-3.078c-.694-.695-1.639-.977-3.078-1.093V2.5a.75.75 0 0 0-1.5 0v1.513C15.585 4 14.839 4 14 4h-4c-.839 0-1.585 0-2.25.013z"/><path fill="currentColor" fill-rule="evenodd" d="M2 12c0-.839 0-1.585.013-2.25h19.974C22 10.415 22 11.161 22 12v2c0 3.771 0 5.657-1.172 6.828S17.771 22 14 22h-4c-3.771 0-5.657 0-6.828-1.172S2 17.771 2 14zm15 2a1 1 0 1 0 0-2a1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2a1 1 0 0 0 0 2m-4-5a1 1 0 1 1-2 0a1 1 0 0 1 2 0m0 4a1 1 0 1 1-2 0a1 1 0 0 1 2 0m-6-3a1 1 0 1 0 0-2a1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2a1 1 0 0 0 0 2" clip-rule="evenodd"/></svg></div>
+					<h3>Calendar</h3>
+					<p>Your next event sits at the notch with a live countdown before it starts.</p>
+				</div>
+				<div class="card">
+					<div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M12 22a9 9 0 1 0 0-18a9 9 0 0 0 0 18m0-13.75a.75.75 0 0 1 .75.75v4a.75.75 0 0 1-1.5 0V9a.75.75 0 0 1 .75-.75M9.25 2a.75.75 0 0 1 .75-.75h4a.75.75 0 0 1 0 1.5h-4A.75.75 0 0 1 9.25 2" clip-rule="evenodd"/></svg></div>
+					<h3>Timers & Weather</h3>
+					<p>Countdowns and a stopwatch, plus the local weather for wherever you are.</p>
+				</div>
+				<div class="card">
+					<div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.959 9.75a.75.75 0 0 1-.75-.75V2a.75.75 0 0 1 1.5 0v7a.75.75 0 0 1-.75.75M7 12.5a3 3 0 1 1 0-6a3 3 0 0 1 0 6m10-1a3 3 0 1 0 0 6a3 3 0 0 0 0-6M6.209 15a.75.75 0 0 1 1.5 0v7a.75.75 0 0 1-1.5 0zm10.75 7.75a.75.75 0 0 1-.75-.75v-2a.75.75 0 0 1 1.5 0v2a.75.75 0 0 1-.75.75M6.209 2a.75.75 0 0 1 1.5 0v2a.75.75 0 0 1-1.5 0z"/></svg></div>
+					<h3>Per-app Audio</h3>
+					<p>Set the volume and tune a full EQ for individual apps, independent of the system mix.</p>
+				</div>
+				<div class="card">
+					<div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18 12a6 6 0 1 1-12 0a6 6 0 0 1 12 0"/><path fill="currentColor" fill-rule="evenodd" d="M12 1.25a.75.75 0 0 1 .75.75v1a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M4.399 4.399a.75.75 0 0 1 1.06 0l.393.392a.75.75 0 0 1-1.06 1.061l-.393-.393a.75.75 0 0 1 0-1.06m15.202 0a.75.75 0 0 1 0 1.06l-.393.393a.75.75 0 0 1-1.06-1.06l.393-.393a.75.75 0 0 1 1.06 0M1.25 12a.75.75 0 0 1 .75-.75h1a.75.75 0 0 1 0 1.5H2a.75.75 0 0 1-.75-.75m19 0a.75.75 0 0 1 .75-.75h1a.75.75 0 0 1 0 1.5h-1a.75.75 0 0 1-.75-.75m-2.102 6.148a.75.75 0 0 1 1.06 0l.393.393a.75.75 0 1 1-1.06 1.06l-.393-.393a.75.75 0 0 1 0-1.06m-12.296 0a.75.75 0 0 1 0 1.06l-.393.393a.75.75 0 1 1-1.06-1.06l.392-.393a.75.75 0 0 1 1.061 0M12 20.25a.75.75 0 0 1 .75.75v1a.75.75 0 0 1-1.5 0v-1a.75.75 0 0 1 .75-.75" clip-rule="evenodd"/></svg></div>
+					<h3>Volume & Brightness HUD</h3>
+					<p>A cleaner overlay that replaces the system one — and drives external monitors over DDC.</p>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<section class="section" id="install" style="background: rgba(255,255,255,0.015);">
+		<div class="wrap">
+			<h2>Install the beta</h2>
+			<p class="lede">Lyria is in open beta. It's free and not yet notarized by Apple, so the first launch takes one extra click.</p>
+			<div class="steps">
+				<div class="step"><p><strong>Download</strong> the latest release and open the disk image.</p></div>
+				<div class="step"><p><strong>Drag Lyria</strong> into your Applications folder.</p></div>
+				<div class="step"><p><strong>Right-click Lyria → Open</strong>, then click <strong>Open</strong> in the dialog. macOS only asks this once, because the beta isn't notarized yet.</p></div>
+				<div class="step"><p>A short <strong>welcome tour</strong> walks you through granting the permissions each feature needs. You stay in control — skip anything you don't want.</p></div>
+			</div>
+			<div class="callout">
+				Updates after that are automatic: Lyria checks for new versions and installs them in place, so you only do the one-time setup once.
+			</div>
+		</div>
+	</section>
+
+	<div class="divider"></div>
+
+	<section class="section privacy" id="privacy">
+		<div class="wrap">
+			<h2>Your data stays on your Mac</h2>
+			<p>Lyria has no account, no sign-in, no analytics, and no servers of its own. Everything it shows — what's playing, your next event, notifications, the local weather — is read and rendered <strong>entirely on your device</strong> and is never sent anywhere.</p>
+			<ul>
+				<li>No telemetry, tracking, or usage data — ever.</li>
+				<li>No account and nothing to sign into.</li>
+				<li>Permissions are requested only for the features that need them, and explained as you go. Decline any of them and the rest of Lyria still works.</li>
+				<li>The single network connection Lyria makes is the <strong>update check</strong>: it fetches the release feed and downloads new versions from GitHub. Nothing about you is included.</li>
+			</ul>
+			<p style="color: var(--faint); font-size: 0.9rem;">Lyria is open source — you can read exactly what it does at <a href="https://github.com/gcrft123/lyria">github.com/gcrft123/lyria</a>.</p>
+		</div>
+	</section>
+
+	<footer>
+		<p><a href="https://github.com/gcrft123/lyria">GitHub</a> · <a href="#privacy">Privacy</a> · <a href="https://github.com/gcrft123/lyria/releases">Releases</a></p>
+		<p style="margin-top: 0.75rem;">Lyria · Apple Silicon · macOS 13+</p>
+	</footer>
+
 </body>
 </html>
