@@ -2,61 +2,47 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key>
-	<string>Lyria</string>
 	<key>CFBundleDisplayName</key>
 	<string>Lyria</string>
-	<!-- NOTE: the bundle identifier is intentionally left as the original while we
-	     decide on a permanent Lyria-branded reverse-DNS id. Changing it resets the
-	     user's TCC grants + persisted settings, so it's a one-time pre-launch call. -->
-	<key>CFBundleIdentifier</key>
-	<string>io.github.gcrft123.lyria</string>
 	<key>CFBundleExecutable</key>
 	<string>Lyria</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.gcrft123.lyria</string>
+	<key>CFBundleName</key>
+	<string>Lyria</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.1</string>
+	<key>CFBundleVersion</key>
+	<string>2</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
-	<!-- Agent app: no Dock icon, no app menu. -->
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Lyria shows and controls what’s playing in Apple Music.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Lyria listens to the audio mix so its glow can pulse in time with the music.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Lyria shows a banner when your Bluetooth devices connect or disconnect.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Lyria shows your upcoming events and a live countdown for events starting soon.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Lyria shows your upcoming events and a live countdown for events starting soon.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocationUsageDescription</key>
+	<string>Lyria uses your location to show the local weather.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Lyria uses your location to show the local weather.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<!-- Sparkle auto-update feed (served from GitHub Pages for gcrft123/lyria).
-	     SUPublicEDKey is added when the EdDSA keypair is generated. -->
 	<key>SUFeedURL</key>
 	<string>https://gcrft123.github.io/lyria/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>1JukJVj+NcHUUdtu6/h3sSL65OrCtSVHDOMfIZYEQWE=</string>
-	<!-- Required so macOS can prompt for permission to mirror & control Music. -->
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Lyria shows and controls what’s playing in Apple Music.</string>
-	<!-- Required: IOBluetooth connect/disconnect notifications trip TCC and
-	     hard-abort the app without this key, even for classic-Bluetooth APIs. -->
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Lyria shows a banner when your Bluetooth devices connect or disconnect.</string>
-	<!-- Required so macOS can prompt to tap the system audio mix, used to pulse
-	     the island's glow in time with the music (Core Audio process tap). -->
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>Lyria listens to the audio mix so its glow can pulse in time with the music.</string>
-	<!-- Required so macOS can prompt for Calendar access, used to show upcoming
-	     events and a live activity for events starting soon. -->
-	<key>NSCalendarsUsageDescription</key>
-	<string>Lyria shows your upcoming events and a live countdown for events starting soon.</string>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Lyria shows your upcoming events and a live countdown for events starting soon.</string>
-	<!-- Required so macOS can prompt for location, used to show local weather. -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Lyria uses your location to show the local weather.</string>
-	<key>NSLocationUsageDescription</key>
-	<string>Lyria uses your location to show the local weather.</string>
 </dict>
 </plist>
