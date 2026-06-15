@@ -94,16 +94,32 @@ struct OnboardingView: View {
                         .animation(Motion.hover, value: phase)
                 }
             }
-            if phase != .finale {
-                let intro = phase == .hello || phase == .trailer
-                Button { intro ? coordinator.skipIntro() : coordinator.finish() } label: {
-                    Text(intro ? "Skip intro" : "Skip the rest")
-                        .font(Typography.footnote)
+            // Back (leading) balanced with Skip (trailing), aligned to the card edges.
+            HStack {
+                if coordinator.canGoBack {
+                    Button { coordinator.back() } label: {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "chevron.left").font(.system(size: IconSize.sm, weight: .bold))
+                            Text("Back").font(Typography.footnote)
+                        }
                         .foregroundStyle(Palette.textTertiary)
                         .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.islandFlat)
                 }
-                .buttonStyle(.islandFlat)
+                Spacer(minLength: Spacing.zero)
+                if phase != .finale {
+                    let intro = phase == .hello || phase == .trailer
+                    Button { intro ? coordinator.skipIntro() : coordinator.finish() } label: {
+                        Text(intro ? "Skip intro" : "Skip the rest")
+                            .font(Typography.footnote)
+                            .foregroundStyle(Palette.textTertiary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.islandFlat)
+                }
             }
+            .frame(width: Layout.onboardingWidth)
         }
     }
 }

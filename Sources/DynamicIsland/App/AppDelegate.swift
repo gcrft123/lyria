@@ -42,12 +42,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notificationAccessConfirmed = false
     private var settingsObserver: AnyCancellable?
 
+    /// Whether `startIntegrations()` has run — providers start once, deferred past
+    /// first-run onboarding so permission prompts fire at their step, not at launch.
+    private var integrationsStarted = false
+
     /// First-launch (or replayed) onboarding takeover; nil when not running.
     private var onboardingWindow: OnboardingWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Leave a local breadcrumb for uncaught exceptions (no SDK / network).
         CrashReporter.install()
+
+        // TEST-ONLY: promote the agent to a regular (Dock-visible) app so automated
+        // UI-control tooling can enumerate + drive it. No effect on shipping (env
+        // unset by default); the onboarding takeover behaves identically either way.
+        if ProcessInfo.processInfo.environment["DI_GRANTABLE"] == "1" {
+            NSApp.setActivationPolicy(.regular)
+        }
 
         // Start Sparkle's scheduled background update checks (manual check lives in
         // Settings ▸ General). Skippable for dev/screenshots via DI_DISABLE_UPDATES=1.
@@ -67,81 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         }
 
-        // Notifications: mirror every macOS banner into the island.
-        if ProcessInfo.processInfo.environment["DI_DISABLE_NOTIFICATIONS"] != "1" {
-            controller.register(notificationProvider)
-            // Once we confirm we can read the store, suppress the system's own
-            // banners so only the island's mirror appears. Gated on access so a
-            // missing Full Disk Access grant never hides notifications silently.
-            notificationProvider.onAccessConfirmed = { [weak self] in
-                self?.notificationAccessConfirmed = true
-                self?.reconcileBannerSuppression()
-            }
-            notificationProvider.startObserving()
-
-            // The "Replace system banners" toggle (Settings ▸ Notifications)
-            // flips DND on/off live — reconcile whenever it changes.
-            settingsObserver = controller.settings.$suppressSystemBanners
-                .sink { [weak self] _ in self?.reconcileBannerSuppression() }
-        }
-
-        // Make sure banners are restored if we're asked to quit (logout, `kill`).
+        // Restore system banners if we're asked to quit (logout, `kill`). Armed
+        // immediately so a clean quit always turns Do Not Disturb back off.
         installTerminationGuard()
-
-        // Bluetooth + AirDrop banners are DISABLED by default — they surfaced as
-        // spurious "periodic" popups: AirDrop's sharingd-log heuristic false-fires on
-        // routine Handoff/Continuity/Universal-Clipboard chatter (sharingd logs
-        // "transfer"/"send"/"request" constantly), and Bluetooth reconnects (AirPods
-        // bouncing audio channels) re-fire the "Connected" banner. Set
-        // DI_ENABLE_BT_AIRDROP=1 to turn them back on.
-        if ProcessInfo.processInfo.environment["DI_ENABLE_BT_AIRDROP"] == "1" {
-            // Bluetooth connect/disconnect → device banners with the right glyph.
-            controller.register(bluetoothProvider)
-            bluetoothProvider.startObserving()
-            // AirDrop send/receive status (best-effort, via the sharingd log).
-            controller.register(airDropProvider)
-            airDropProvider.startObserving()
-        }
-
-        // Music: live, mirroring Apple Music.
-        controller.register(musicProvider)
-        musicProvider.startObserving()
-
-        // Volume/brightness keys → island HUD that replaces the system overlay
-        // (intercepts the hardware keys; needs Accessibility, prompts on first
-        // launch).
-        controller.register(systemHUDProvider)
-        systemHUDProvider.startObserving()
-
-        // Calendar: upcoming events + a notch live activity for events starting
-        // in under 15 minutes (needs Calendar access; prompts on first launch).
-        controller.register(eventKitProvider)
-        eventKitProvider.startObserving()
-
-        // Camera/mic usage → orange side extension riding at the island's edge.
-        let privacyMonitor = PrivacyMonitor()
-        controller.register(extensionProvider: privacyMonitor)
-        self.privacyMonitor = privacyMonitor
-
-        // Light/dark appearance switches → sun/moon banner.
-        controller.register(appearanceProvider)
-        appearanceProvider.startObserving()
-
-        // External display connect/disconnect → display banner.
-        controller.register(displayProvider)
-        displayProvider.startObserving()
-
-        // Wi-Fi connect/disconnect/network-change → Wi-Fi banner.
-        controller.register(wifiProvider)
-        wifiProvider.startObserving()
-
-        // Focus / Do Not Disturb changes → Focus banner. Reads the DoNotDisturb
-        // store (needs Full Disk Access; degrades to silent without it) and skips
-        // the DND this app itself toggles to suppress system banners.
-        let focusProvider = FocusProvider(focusController: focusController)
-        controller.register(focusProvider)
-        focusProvider.startObserving()
-        self.focusProvider = focusProvider
 
         let windowController = IslandWindowController(controller: controller)
         windowController.show()
@@ -156,9 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WindowActivationTracker.shared.start()
         let switcherWindow = SwitcherWindowController(switcher: windowSwitcher)
         self.switcherWindow = switcherWindow
-        let switcherHotKey = SwitcherHotKey(switcher: windowSwitcher)
-        switcherHotKey.start()
-        self.switcherHotKey = switcherHotKey
+        // The hot-key tap needs Accessibility, so it's started in startIntegrations()
+        // — immediately for a returning user, or after onboarding on first run.
+        self.switcherHotKey = SwitcherHotKey(switcher: windowSwitcher)
 
         switch ProcessInfo.processInfo.environment["DI_MOCK_SWITCHER"] {
         case "1":
@@ -208,16 +147,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(replayOnboarding),
             name: .replayOnboarding, object: nil)
         let env = ProcessInfo.processInfo.environment
-        if env["DI_FORCE_ONBOARDING"] == "1" || env["DI_ONBOARD_PREVIEW"] == "1"
-            || !controller.settings.onboardingCompleted {
+        let windowedPreview = env["DI_ONBOARD_PREVIEW"] == "1"
+        let willOnboard = env["DI_FORCE_ONBOARDING"] == "1" || windowedPreview
+            || !controller.settings.onboardingCompleted
+
+        if willOnboard && !windowedPreview {
+            // First-run takeover: DEFER all integration startup until onboarding
+            // finishes, so each permission is requested at its own step rather than
+            // racing in at launch. startIntegrations() runs from `onComplete`.
             presentOnboarding()
-        } else if env["DI_MOCK_HINT"] == "1" {
-            // Seed the onboarding "open me" live activity (without the takeover) so
-            // it can be inspected on the normal island.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.controller.presentOnboardingHint()
+        } else {
+            // Returning user (or the windowed debug preview): bring everything up now.
+            startIntegrations()
+            if windowedPreview {
+                presentOnboarding()
+            } else if env["DI_MOCK_HINT"] == "1" {
+                // Seed the onboarding "open me" live activity (without the takeover)
+                // so it can be inspected on the normal island.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.controller.presentOnboardingHint()
+                }
             }
         }
+    }
+
+    /// Bring up everything that observes the system or needs a permission. Deferred
+    /// past first-run onboarding so each prompt fires at its step, not at launch.
+    /// Idempotent — called immediately for a returning user, or from the onboarding's
+    /// completion on first run (a no-op if the intro was merely replayed).
+    private func startIntegrations() {
+        guard !integrationsStarted else { return }
+        integrationsStarted = true
+
+        // Notifications: mirror every macOS banner into the island.
+        if ProcessInfo.processInfo.environment["DI_DISABLE_NOTIFICATIONS"] != "1" {
+            controller.register(notificationProvider)
+            // Once we confirm we can read the store, suppress the system's own
+            // banners so only the island's mirror appears. Gated on access so a
+            // missing Full Disk Access grant never hides notifications silently.
+            notificationProvider.onAccessConfirmed = { [weak self] in
+                self?.notificationAccessConfirmed = true
+                self?.reconcileBannerSuppression()
+            }
+            notificationProvider.startObserving()
+            // The "Replace system banners" toggle flips DND on/off live.
+            settingsObserver = controller.settings.$suppressSystemBanners
+                .sink { [weak self] _ in self?.reconcileBannerSuppression() }
+        }
+
+        // Bluetooth + AirDrop banners are DISABLED by default (false-firing); set
+        // DI_ENABLE_BT_AIRDROP=1 to turn them back on.
+        if ProcessInfo.processInfo.environment["DI_ENABLE_BT_AIRDROP"] == "1" {
+            controller.register(bluetoothProvider); bluetoothProvider.startObserving()
+            controller.register(airDropProvider); airDropProvider.startObserving()
+        }
+
+        // Music: live, mirroring Apple Music (Apple Events / Automation).
+        controller.register(musicProvider)
+        musicProvider.startObserving()
+
+        // Volume/brightness keys → island HUD (needs Accessibility).
+        controller.register(systemHUDProvider)
+        systemHUDProvider.startObserving()
+
+        // Calendar: upcoming events + a notch live activity (needs Calendar access).
+        controller.register(eventKitProvider)
+        eventKitProvider.startObserving()
+
+        // Camera/mic usage → orange side extension riding at the island's edge.
+        let privacyMonitor = PrivacyMonitor()
+        controller.register(extensionProvider: privacyMonitor)
+        self.privacyMonitor = privacyMonitor
+
+        // Appearance / display / Wi-Fi banners.
+        controller.register(appearanceProvider); appearanceProvider.startObserving()
+        controller.register(displayProvider); displayProvider.startObserving()
+        controller.register(wifiProvider); wifiProvider.startObserving()
+
+        // Focus / Do Not Disturb changes → Focus banner (reads the DND store; FDA).
+        let focusProvider = FocusProvider(focusController: focusController)
+        controller.register(focusProvider)
+        focusProvider.startObserving()
+        self.focusProvider = focusProvider
+
+        // Weather (requests Location).
+        controller.weatherManager.start()
+
+        // Alt+Tab window-switcher hot-key tap (needs Accessibility).
+        switcherHotKey?.start()
     }
 
     @objc private func replayOnboarding() { presentOnboarding() }
@@ -232,6 +249,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding.onComplete = { [weak self] in
             guard let self else { return }
             self.windowController?.setVisible(true)
+            // Now that the user has been through (and granted) permissions, bring the
+            // integrations up. Idempotent — a no-op for a returning user who merely
+            // replayed the intro (their providers are already running).
+            self.startIntegrations()
             // The card has just morphed into the notch — greet with a live-activity
             // hint teaching the gesture that opens the island.
             self.controller.presentOnboardingHint()

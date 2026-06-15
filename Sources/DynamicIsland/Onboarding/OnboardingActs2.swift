@@ -34,7 +34,7 @@ struct PermissionsAct: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .id(coordinator.permissionIndex)   // resets `asked` for each card
+                .id(coordinator.permissionIndex)   // re-inserts the card view per permission
             }
 
             Spacer(minLength: Spacing.zero)
@@ -44,6 +44,11 @@ struct PermissionsAct: View {
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .actPadding()
+        // `asked` is owned by this act view, so the `.id` on the card above can't
+        // reset it — without this every card after the first would skip straight to
+        // "Next / Open Settings again" and never fire its actual grant. Reset it
+        // whenever the active permission changes (forward via Next, back via Back).
+        .onChange(of: coordinator.permissionIndex) { _ in asked = false }
     }
 
     private func sensePreview(glyph: String, active: Bool) -> some View {
