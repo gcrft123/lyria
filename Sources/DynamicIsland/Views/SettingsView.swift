@@ -243,6 +243,22 @@ struct SettingsView: View {
             }
             .buttonStyle(.islandFlat)
 
+            Rectangle().fill(Palette.hairlineStroke).frame(height: 1)
+
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                HStack(spacing: 0) {
+                    rowLabel("Quit Lyria", systemImage: "power")
+                    Spacer(minLength: Spacing.md)
+                    Image(systemName: "arrow.right.circle")
+                        .font(.system(size: IconSize.md))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.islandFlat)
+
             Text(appVersionLine)
                 .font(Typography.footnote)
                 .foregroundStyle(Palette.textTertiary)

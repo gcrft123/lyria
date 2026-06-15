@@ -28,6 +28,11 @@ final class OnboardingWindowController {
     /// System Settings after granting), so the card is reachable.
     private var activationObserver: NSObjectProtocol?
 
+    /// True while a grant is in flight and the takeover has been stepped aside
+    /// (hidden for an alert, or lowered for a Settings pane). Used to decide whether
+    /// becoming active again should restore the takeover.
+    private var focusActive = false
+
     /// Debug: render in a small corner window that never steals focus, so the
     /// onboarding can be inspected without taking over the screen.
     private let preview = ProcessInfo.processInfo.environment["DI_ONBOARD_PREVIEW"] == "1"
@@ -66,18 +71,59 @@ final class OnboardingWindowController {
         if !preview {
             activationObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { guard let self, self.panel.isVisible else { return }
-                    self.panel.makeKeyAndOrderFront(nil) }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if self.focusActive {
+                        // The user came back from a grant — the alert was answered, or
+                        // they clicked the still-visible card after toggling a pane.
+                        // Restore the takeover and clear focus so they land on the card.
+                        self.setPermissionFocus(.none)
+                    } else if self.panel.isVisible {
+                        self.panel.makeKeyAndOrderFront(nil)
+                    }
+                }
             }
         }
     }
 
-    /// While a grant is in progress, drop the takeover to the normal window level
-    /// so System Settings and TCC prompts can come above it; raise it back once the
-    /// user moves on. (No re-activation here — that caused focus thrash.)
-    private func setPermissionFocus(_ focus: Bool) {
+    /// Step the takeover aside for a grant, then restore it. The strategy depends on
+    /// how the grant surfaces (see `PermissionFocus`):
+    ///   • `.dialog` — lower to `.normal` (the centered system alert sits above it) and
+    ///     keep the app frontmost via `NSApp.activate`, since macOS only shows these
+    ///     alerts for the frontmost app. When the alert is answered the app reactivates
+    ///     and the observer restores the card.
+    ///   • `.pane`   — only lower to `.normal` and stay visible, so System Settings can
+    ///     come above it and the user can click the card to return (this agent has no
+    ///     Dock icon or menu-bar item, so a visible card is the only way back).
+    ///   • `.none`   — restore: back to full-screen `.screenSaver`, refronting only if
+    ///     we were actually mid-grant (avoids focus thrash on ordinary act changes).
+    private func setPermissionFocus(_ focus: PermissionFocus) {
         guard !preview else { return }
-        panel.level = focus ? .normal : .screenSaver
+        switch focus {
+        case .none:
+            let wasFocused = focusActive
+            focusActive = false
+            panel.level = .screenSaver
+            if wasFocused {
+                panel.setFrame(OnboardingWindowController.targetScreen().frame, display: true)
+                panel.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        case .pane:
+            focusActive = true
+            panel.level = .normal
+        case .dialog:
+            // Lower the takeover (a centered TCC alert sits above a `.normal`
+            // window) but keep it on screen AND keep the app frontmost. Fully
+            // hiding it via `orderOut` dropped this LSUIElement agent out of
+            // frontmost, and macOS only shows the Calendar/Location/Bluetooth/
+            // Automation prompts for the frontmost app — so the request fired but
+            // no alert ever appeared. Staying active fixes that; the pane fallback
+            // in PermissionService covers the case where the alert still doesn't show.
+            focusActive = true
+            panel.level = .normal
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     func show() {

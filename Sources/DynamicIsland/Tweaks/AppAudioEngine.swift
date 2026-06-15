@@ -171,6 +171,27 @@ final class AppAudioEngine {
 
     // MARK: Pipeline
 
+    /// Trip the macOS **Audio Capture** TCC prompt (gated by
+    /// `NSAudioCaptureUsageDescription`) by briefly creating — and immediately
+    /// destroying — a global process tap, the exact operation per-app audio needs
+    /// permission for. Onboarding calls this so "System Audio" is actually requested;
+    /// opening the Settings pane alone never prompts and leaves the app unlisted.
+    /// No-op below macOS 14.4, where process taps don't exist.
+    static func requestCapturePermission() {
+        guard #available(macOS 14.4, *) else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+            desc.isPrivate = true
+            var tap = AudioObjectID(kAudioObjectUnknown)
+            // The create call itself surfaces the prompt / registers the app in the
+            // Audio Capture list even when it returns an error the first time.
+            if AudioHardwareCreateProcessTap(desc, &tap) == noErr,
+               tap != AudioObjectID(kAudioObjectUnknown) {
+                AudioHardwareDestroyProcessTap(tap)
+            }
+        }
+    }
+
     private func rebuild(pids: [pid_t]) {
         teardown()
         guard !pids.isEmpty else { log("no controlled apps — pipeline down"); return }

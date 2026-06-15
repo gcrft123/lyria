@@ -61,7 +61,6 @@ final class OnboardingCoordinator: ObservableObject {
     @Published private(set) var morphingOut = false
 
     let permissions = OnboardingPermission.allCases
-    let audio = OnboardingAudio()
     let permissionService = PermissionService()
     let settings: AppSettings
 
@@ -69,9 +68,10 @@ final class OnboardingCoordinator: ObservableObject {
     var onFinish: (() -> Void)?
 
     /// While a grant flow needs the system UI (System Settings / a TCC prompt),
-    /// the host lowers the takeover so those can surface above it; raised back
-    /// once the user moves on.
-    var onPermissionFocus: ((Bool) -> Void)?
+    /// the host steps the takeover aside so those can surface — fully hiding it for
+    /// a centered alert (`.dialog`) or just lowering it for a Settings-pane toggle
+    /// (`.pane`) — and restores it (`.none`) once the user moves on.
+    var onPermissionFocus: ((PermissionFocus) -> Void)?
 
     var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
@@ -117,7 +117,6 @@ final class OnboardingCoordinator: ObservableObject {
     // MARK: Lifecycle
 
     func start() {
-        audio.start()   // ambient pad only (no chimes)
         if let phase = Self.previewPhaseFromEnv() {
             previewMode = true
             previewBeat = Int(ProcessInfo.processInfo.environment["DI_ONBOARD_BEAT"] ?? "") ?? 0
@@ -139,13 +138,12 @@ final class OnboardingCoordinator: ObservableObject {
     func finish() {
         guard !morphingOut else { return }
         cancelTimer()
-        onPermissionFocus?(false)
+        onPermissionFocus?(.none)
         withAnimation(reduceMotion ? Motion.reduced : Motion.morph) { morphingOut = true }
         schedule(after: reduceMotion ? 0.25 : 0.6) { [weak self] in self?.tearDown() }
     }
 
     private func tearDown() {
-        audio.stop()
         clearProgress()
         settings.onboardingCompleted = true
         onFinish?()
@@ -166,7 +164,7 @@ final class OnboardingCoordinator: ObservableObject {
     /// trailer beat) so the user lands exactly where they left off.
     private func resume(to phase: OnboardingPhase) {
         cancelTimer()
-        onPermissionFocus?(false)
+        onPermissionFocus?(.none)
         permissionIndex = min(max(0, progressStore.integer(forKey: Progress.permissionIndex)),
                               max(0, permissions.count - 1))
         trailerBeat = min(max(0, progressStore.integer(forKey: Progress.trailerBeat)),
@@ -193,7 +191,7 @@ final class OnboardingCoordinator: ObservableObject {
 
     private func enter(_ next: OnboardingPhase) {
         cancelTimer()
-        onPermissionFocus?(false)
+        onPermissionFocus?(.none)
         withAnimation(reduceMotion ? Motion.reduced : Motion.morph) {
             phase = next
         }
@@ -223,6 +221,38 @@ final class OnboardingCoordinator: ObservableObject {
         }
     }
 
+    /// Whether a "Back" affordance should show — everything past the auto-advancing
+    /// pre-roll and the opening Hello has somewhere to step back to.
+    var canGoBack: Bool {
+        switch phase {
+        case .awakening, .hello: return false
+        default: return true
+        }
+    }
+
+    /// Step backward: within the trailer / permissions sub-steps first, then to the
+    /// previous act. Mirrors `advancePhase` / `advanceTrailer` / `nextPermission`.
+    func back() {
+        cancelTimer()
+        onPermissionFocus?(.none)
+        switch phase {
+        case .trailer:
+            if trailerBeat > 0 {
+                withAnimation(reduceMotion ? Motion.reduced : Motion.contentMorph) { trailerBeat -= 1 }
+                saveProgress()
+            } else { enter(.hello) }
+        case .permissions:
+            if permissionIndex > 0 {
+                withAnimation(reduceMotion ? Motion.reduced : Motion.transition) { permissionIndex -= 1 }
+                saveProgress()
+            } else { enter(.trailer) }
+        case .personalize: enter(.permissions)
+        case .tryMe:       enter(.personalize)
+        case .finale:      enter(.tryMe)
+        case .awakening, .hello: break
+        }
+    }
+
     // MARK: Trailer (user-advanced)
 
     /// Step the trailer forward one vignette, or into permissions after the last.
@@ -239,24 +269,26 @@ final class OnboardingCoordinator: ObservableObject {
 
     // MARK: Permissions (fully user-paced — Grant fires the request, Continue moves on)
 
-    /// Lower the takeover so the system UI can surface, then fire the request /
-    /// open the relevant System Settings pane.
+    /// Step the takeover aside for the system UI (hide for an alert, lower for a
+    /// pane — per the permission's `grantFocus`), then fire the request.
     func grantCurrent() {
         guard let permission = currentPermission else { return }
-        onPermissionFocus?(true)
+        onPermissionFocus?(permission.grantFocus)
         permissionService.request(permission)
     }
 
     /// Re-open the System Settings pane (the "Open Settings again" affordance).
+    /// Always treated as a pane interaction — keep the takeover visible so the user
+    /// can click back to it.
     func openSettingsForCurrent() {
         guard let permission = currentPermission else { return }
-        onPermissionFocus?(true)
+        onPermissionFocus?(.pane)
         permissionService.openSettings(permission)
     }
 
     /// Advance to the next permission (Continue / Skip), or on to personalize.
     func nextPermission() {
-        onPermissionFocus?(false)
+        onPermissionFocus?(.none)
         if permissionIndex + 1 >= permissions.count {
             enter(.personalize); return
         }

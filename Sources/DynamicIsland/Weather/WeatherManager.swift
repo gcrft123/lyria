@@ -63,6 +63,11 @@ final class WeatherManager: NSObject, ObservableObject {
         }
     }
 
+    /// True once a mock snapshot is seeded — `start()` then no-ops.
+    private var mocked = false
+    /// Guards `start()` against running twice.
+    private var didStart = false
+
     init(settings: AppSettings? = nil) {
         self.settings = settings
         super.init()
@@ -79,6 +84,7 @@ final class WeatherManager: NSObject, ObservableObject {
         // Mock path: seed a full synthetic snapshot and stop — no network, no
         // location prompt. The variant chooses the hero condition.
         if let mock = ProcessInfo.processInfo.environment["DI_MOCK_WEATHER"], !mock.isEmpty {
+            mocked = true
             var snap = Self.mockSnapshot(variant: mock, isFahrenheit: isFahrenheit)
             // DI_MOCK_WEATHER_FLASH=alert|condition exercises the 10s notch flash:
             // `alert` attaches a severe advisory; either value fires the trigger a
@@ -96,6 +102,18 @@ final class WeatherManager: NSObject, ObservableObject {
             }
             return
         }
+
+    }
+
+    deinit { refreshTimer?.invalidate() }
+
+    /// Begin live weather: request location (prompting if needed) and start the
+    /// refresh loop. Deferred until the app calls it — on first run that's AFTER
+    /// onboarding completes, so the Location prompt fires at the onboarding step
+    /// rather than at launch. No-op when a mock snapshot is already seeded.
+    func start() {
+        guard !mocked, !didStart else { return }
+        didStart = true
 
         // Fixed-location override (handy for testing the live path deterministically).
         if let loc = ProcessInfo.processInfo.environment["DI_WEATHER_LOC"] {
@@ -123,19 +141,18 @@ final class WeatherManager: NSObject, ObservableObject {
         }
     }
 
-    deinit { refreshTimer?.invalidate() }
-
     // MARK: Location
 
     private func requestLocation() {
-        let status = locationManager.authorizationStatus
-        switch status {
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
+        // Onboarding owns the Location *prompt* (so it fires at its step, not at
+        // launch). Here we only act on an already-granted authorization — a grant
+        // made during onboarding lands via the delegate and fetches then; if it's
+        // still undetermined or denied, the 4s fallback fills in a sane default.
+        switch locationManager.authorizationStatus {
         case .authorized, .authorizedAlways:
             locationManager.requestLocation()
         default:
-            break // the 4s fallback covers denied/restricted
+            break
         }
     }
 
