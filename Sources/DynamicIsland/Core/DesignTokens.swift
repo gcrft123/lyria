@@ -108,7 +108,7 @@ enum Palette {
     static let tintDashboard = indigo
     static let tintTimers = cyan
     static let tintWeather = blue
-    static let tintTweaks = green
+    static let tintCalculator = orange
 }
 
 // MARK: - Motion
@@ -218,6 +218,10 @@ enum Layout {
     static let listRowHeight: CGFloat = 44
     /// A list→detail category navigation row (a touch taller, more presence).
     static let navRowHeight: CGFloat = 48
+
+    /// Bottom inset for the Music browse-tab scroll content so its last rows clear
+    /// the floating mini-player pill docked at the card's bottom.
+    static let musicMiniClearance: CGFloat = 64
 
     // — Control metrics (hit targets) —
     /// The minimum tappable square for ANY control.

@@ -287,12 +287,9 @@ final class IslandWindowController: NSObject {
 
             if shouldExpand {
                 controller.interactionHandler?.pointerDidEnter()
-                // The music player's volume/slider hover zones only make sense when
-                // the music app is the one expanded in the main island.
-                if isMusicExpanded {
-                    updateVolumeReveal(at: location)
-                    updateControlHover(at: location)
-                }
+                // (The Music player's volume row is toggled by tapping the speaker
+                // icon — see `toggleVolumeReveal` — so there are no geometry-based
+                // music hover zones to update here anymore.)
                 // Reveal the pin affordance while the pointer is over the card's
                 // top-right corner (only when there's an expanded card to pin).
                 controller.setPinCornerHovered(controller.mode.isExpanded && pinCornerRect().contains(location))
@@ -336,10 +333,13 @@ final class IslandWindowController: NSObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.exitWorkItem = nil
-            let stillOutside = !self.controller.isEditing
-                && !self.islandScreenRect(inflatedBy: self.activeHoverPadding)
-                    .contains(NSEvent.mouseLocation)
-            if stillOutside {
+            let outside = !self.islandScreenRect(inflatedBy: self.activeHoverPadding)
+                .contains(NSEvent.mouseLocation)
+            if outside {
+                // End any text editing (the Music search field, a timer rename) so a
+                // focused field doesn't pin the island open after the pointer has
+                // clearly left — previously `isEditing` blocked this collapse entirely.
+                if self.controller.isEditing { self.controller.endEditing() }
                 // Fully collapsing now — require the click/scroll gesture again
                 // next visit.
                 self.expansionCommitted = false
@@ -348,39 +348,6 @@ final class IslandWindowController: NSObject {
         }
         exitWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + exitGrace, execute: work)
-    }
-
-    /// True only when the music app fills the expanded main island (not settings,
-    /// not another app), so its hover zones apply.
-    private var isMusicExpanded: Bool {
-        if case .expanded(.music) = controller.mode { return true }
-        return false
-    }
-
-    /// Track which slider the pointer is over so it can thicken on hover.
-    private func updateControlHover(at location: NSPoint) {
-        guard controller.isHovered else { controller.setHoveredControl(.none); return }
-        if controller.volumeRevealed, volumeBarHoverRect().contains(location) {
-            controller.setHoveredControl(.volume)
-        } else if progressBarHoverRect().contains(location) {
-            controller.setHoveredControl(.progress)
-        } else {
-            controller.setHoveredControl(.none)
-        }
-    }
-
-    /// Reveal the volume bar when the pointer is over the speaker icon, and
-    /// keep it revealed while the pointer stays in the keep zone: the icon plus
-    /// everything below the transport row (the bar AND the bottom button row).
-    /// The transport (play) buttons are deliberately excluded, and the bottom
-    /// row is included so moving onto it doesn't shrink the card out from under
-    /// the pointer.
-    private func updateVolumeReveal(at location: NSPoint) {
-        guard controller.isHovered else { return }
-        let revealed = controller.volumeRevealed
-            ? (volumeIconRect(pad: 14).contains(location) || volumeLowerRect(pad: 14).contains(location))
-            : volumeIconRect(pad: 12).contains(location)
-        controller.setVolumeRevealed(revealed)
     }
 
     /// The island's hover hitbox in screen coordinates (Cocoa, bottom-left
@@ -479,78 +446,6 @@ final class IslandWindowController: NSObject {
             scrollAccum = 0
         }
         return true
-    }
-
-    // MARK: Volume hover zones (screen coordinates, Cocoa origin)
-
-    /// Y offset (down from the card's top edge) of the transport row's top —
-    /// where the volume speaker icon lives. The expanded layout is top-anchored
-    /// with fixed metrics, so this is the same whether or not the bar is shown.
-    private var transportTopOffset: CGFloat {
-        configuration.expandedVMargin
-            + configuration.topRowHeight + configuration.expandedRowSpacing
-            + configuration.progressRowHeight + configuration.expandedRowSpacing
-    }
-
-    private var transportBottomOffset: CGFloat {
-        transportTopOffset + configuration.transportRowHeight
-    }
-
-    private var cardTopY: CGFloat { panel.frame.maxY - configuration.topInset }
-    /// Left edge of the music *content* (right of the sidebar) within the
-    /// expanded card, which is centred and includes the app sidebar on its left.
-    private var cardLeftX: CGFloat {
-        panel.frame.midX - configuration.expandedTotalWidth / 2 + configuration.sidebarWidth
-    }
-
-    /// Zone over the speaker icon (left end of the transport row only — not the
-    /// centered play buttons). Entering it reveals the volume bar.
-    private func volumeIconRect(pad: CGFloat) -> NSRect {
-        let top = cardTopY - transportTopOffset
-        let bottom = cardTopY - transportBottomOffset
-        let width = configuration.expandedHMargin + 56
-        return NSRect(x: cardLeftX - pad,
-                      y: bottom - pad,
-                      width: width + pad,
-                      height: (top - bottom) + 2 * pad)
-    }
-
-    /// Everything below the transport row, across the PLAYER column — the volume
-    /// bar and the bottom (shuffle/AirPlay/repeat) row. Keeping this in the zone
-    /// means the card won't shrink while the pointer is anywhere in the lower half.
-    /// Uses `musicPlayerWidth` (not the full content width) since the queue sidebar
-    /// occupies the right part of the content.
-    private func volumeLowerRect(pad: CGFloat) -> NSRect {
-        let top = cardTopY - transportBottomOffset
-        let bottom = cardTopY - configuration.expandedVolumeHeight
-        return NSRect(x: cardLeftX - pad,
-                      y: bottom - pad,
-                      width: configuration.musicPlayerWidth + 2 * pad,
-                      height: (top - bottom) + 2 * pad)
-    }
-
-    // Hover bands around each slider (for thickening). Slightly padded so the
-    // track is easy to land on. Spans the PLAYER column width (the queue sidebar
-    // sits to its right).
-    private func sliderHoverRect(topOffset: CGFloat, rowHeight: CGFloat) -> NSRect {
-        let pad: CGFloat = 9
-        let top = cardTopY - (topOffset - pad)
-        let bottom = cardTopY - (topOffset + rowHeight + pad)
-        let left = cardLeftX + configuration.expandedHMargin - pad
-        let width = configuration.musicPlayerWidth - 2 * configuration.expandedHMargin + 2 * pad
-        return NSRect(x: left, y: bottom, width: width, height: top - bottom)
-    }
-
-    private func progressBarHoverRect() -> NSRect {
-        // The bar sits at the top of the progress row (above the time labels).
-        let topOffset = configuration.expandedVMargin
-            + configuration.topRowHeight + configuration.expandedRowSpacing
-        return sliderHoverRect(topOffset: topOffset, rowHeight: 14)
-    }
-
-    private func volumeBarHoverRect() -> NSRect {
-        let topOffset = transportBottomOffset + configuration.expandedRowSpacing
-        return sliderHoverRect(topOffset: topOffset, rowHeight: configuration.volumeRowHeight)
     }
 
     // MARK: Positioning

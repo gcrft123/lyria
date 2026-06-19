@@ -35,6 +35,8 @@ struct DynamicIslandTests {
     @MainActor
     static func main() {
         runCoreLogicTests()
+        runCalculatorEngineTests()
+        runMusicLibraryTests()
 
         let line = "Tests: \(TestState.passed) passed, \(TestState.failed) failed\n"
         FileHandle.standardError.write(Data(line.utf8))

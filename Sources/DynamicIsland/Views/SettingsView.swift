@@ -2,10 +2,11 @@ import SwiftUI
 
 /// The settings page, opened from the gear icon at the bottom of the sidebar.
 ///
-/// Settings-style architecture (matching the Tweaks app): a LIST of categories,
-/// each opening its own detail page with a back button. Reading every value from
-/// the shared `AppSettings` environment object means flipping a control updates
-/// the live island immediately.
+/// A LIST of categories, each opening its own detail page with a back button.
+/// Reading every value from the shared `AppSettings` environment object means
+/// flipping a control updates the live island immediately. "Tweaks" is a category
+/// here (the former standalone Tweaks app) whose detail is itself a small list —
+/// App Volume and EQ & Spatial — each pushing to its own page.
 struct SettingsView: View {
     @ObservedObject var controller: DynamicIslandController
     @EnvironmentObject var settings: AppSettings
@@ -18,6 +19,7 @@ struct SettingsView: View {
         case weather
         case timers
         case notifications
+        case tweaks
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -27,6 +29,7 @@ struct SettingsView: View {
             case .weather: return "Weather"
             case .timers: return "Timers"
             case .notifications: return "Notifications"
+            case .tweaks: return "Tweaks"
             }
         }
         var subtitle: String {
@@ -37,6 +40,7 @@ struct SettingsView: View {
             case .weather: return "Units & condition alerts"
             case .timers: return "Finish chime"
             case .notifications: return "How banners appear on the island"
+            case .tweaks: return "Per-app volume, EQ & spatial pan"
             }
         }
         var icon: String {
@@ -47,6 +51,7 @@ struct SettingsView: View {
             case .weather: return "cloud.sun.fill"
             case .timers: return "timer"
             case .notifications: return "bell.badge"
+            case .tweaks: return "slider.horizontal.3"
             }
         }
         static func fromEnv(_ v: String?) -> Category? {
@@ -55,12 +60,52 @@ struct SettingsView: View {
         }
     }
 
-    /// `DI_SETTINGS_PAGE=music|notifications` opens a detail page directly (screenshots).
-    @State private var selected: Category? =
-        Category.fromEnv(ProcessInfo.processInfo.environment["DI_SETTINGS_PAGE"])
+    /// A page within the Tweaks category — each pushes to its own detail.
+    enum TweakPage: String, Identifiable, CaseIterable {
+        case appVolume
+        case equalizer
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .appVolume: return "App Volume"
+            case .equalizer: return "EQ & Spatial"
+            }
+        }
+        var subtitle: String {
+            switch self {
+            case .appVolume: return "Set volume & mute per app"
+            case .equalizer: return "Per-app equalizer & stereo pan"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .appVolume: return "speaker.wave.2.fill"
+            case .equalizer: return "slider.vertical.3"
+            }
+        }
+        /// Value of `DI_TWEAKS_PAGE` that opens this page directly (for screenshots).
+        static func fromEnv(_ v: String?) -> TweakPage? {
+            switch v {
+            case "appvolume": return .appVolume
+            case "eq", "equalizer": return .equalizer
+            default: return nil
+            }
+        }
+    }
+
+    /// `DI_SETTINGS_PAGE=music|notifications` (or `DI_TWEAKS_PAGE=…`) opens a detail
+    /// page directly (screenshots).
+    @State private var selected: Category? = {
+        let env = ProcessInfo.processInfo.environment
+        if env["DI_TWEAKS_PAGE"] != nil { return .tweaks }
+        return Category.fromEnv(env["DI_SETTINGS_PAGE"])
+    }()
     /// Whether the Music → "Wave sensitivity" sub-page is open.
     @State private var showWave =
         ProcessInfo.processInfo.environment["DI_SETTINGS_PAGE"] == "wave"
+    /// The open Tweaks sub-page (App Volume / EQ & Spatial), if any.
+    @State private var selectedTweak: TweakPage? =
+        TweakPage.fromEnv(ProcessInfo.processInfo.environment["DI_TWEAKS_PAGE"])
 
     /// Accent for the controls — follows the artwork tint preference, falling back
     /// to neutral so the page still looks right with tinting off.
@@ -73,6 +118,9 @@ struct SettingsView: View {
             if selected == .music, showWave {
                 waveSensitivityPage
                     .transition(Transitions.detailPush)
+            } else if selected == .tweaks, let tweak = selectedTweak {
+                tweakDetail(tweak)
+                    .transition(Transitions.detailPush)
             } else if let selected {
                 detail(selected)
                     .transition(Transitions.detailPush)
@@ -84,8 +132,24 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(Motion.transition, value: selected)
         .animation(Motion.transition, value: showWave)
-        .onChange(of: selected) { _ in showWave = false }
+        .animation(Motion.transition, value: selectedTweak)
+        .onChange(of: selected) { _ in
+            showWave = false
+            if selected != .tweaks { selectedTweak = nil }
+            syncEQHeight()
+        }
+        .onChange(of: selectedTweak) { _ in syncEQHeight() }
+        .onAppear { syncEQHeight() }
+        // The EQ page grows the settings card; make sure leaving the page (or
+        // closing settings) returns the card to the standard height.
+        .onDisappear { controller.appVolumeStore.eqPageActive = false }
         .tint(accent)
+    }
+
+    /// The Tweaks → "EQ & Spatial" page is the one settings page taller than the
+    /// 324 standard; flag it on the store so the controller sizes the card to match.
+    private func syncEQHeight() {
+        controller.appVolumeStore.eqPageActive = (selected == .tweaks && selectedTweak == .equalizer)
     }
 
     // MARK: List
@@ -103,7 +167,8 @@ struct SettingsView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: Spacing.md) {
                     ForEach(Category.allCases) { category in
-                        SettingsRow(category: category, accent: accent) { selected = category }
+                        NavCard(icon: category.icon, title: category.title,
+                                subtitle: category.subtitle, accent: accent) { selected = category }
                     }
                 }
                 .padding(.horizontal, Spacing.xxl)
@@ -113,9 +178,12 @@ struct SettingsView: View {
         }
     }
 
-    /// A category row with a hover animation (background lift, icon swell, chevron slide).
-    private struct SettingsRow: View {
-        let category: Category
+    /// A tappable list row with a hover animation (background lift, icon swell,
+    /// chevron slide). Shared by the Settings category list and the Tweaks sub-list.
+    private struct NavCard: View {
+        let icon: String
+        let title: String
+        let subtitle: String
         let accent: Color
         let action: () -> Void
         @State private var hovering = false
@@ -123,15 +191,15 @@ struct SettingsView: View {
         var body: some View {
             Button(action: action) {
                 HStack(spacing: Spacing.xl) {
-                    Image(systemName: category.icon)
+                    Image(systemName: icon)
                         .font(.system(size: IconSize.md, weight: .semibold))
                         .foregroundStyle(accent)
                         .frame(width: 30, height: 30)
                         .background(Circle().fill(accent.opacity(hovering ? 0.30 : 0.18)))
                         .scaleEffect(hovering ? 1.08 : 1)
                     VStack(alignment: .leading, spacing: Spacing.hairline) {
-                        Text(category.title).font(Typography.bodyStrong).foregroundStyle(Palette.textPrimary)
-                        Text(category.subtitle).font(Typography.footnote)
+                        Text(title).font(Typography.bodyStrong).foregroundStyle(Palette.textPrimary)
+                        Text(subtitle).font(Typography.footnote)
                             .foregroundStyle(hovering ? Palette.textSecondary : Palette.textTertiary)
                     }
                     Spacer(minLength: Spacing.xs)
@@ -158,24 +226,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func detail(_ category: Category) -> some View {
         VStack(spacing: 0) {
-            ZStack {
-                Text(category.title).font(Typography.bodyStrong).foregroundStyle(Palette.textPrimary)
-                HStack {
-                    Button { selected = nil } label: {
-                        HStack(spacing: Spacing.xs) {
-                            Image(systemName: "chevron.left").font(.system(size: IconSize.sm, weight: .bold))
-                            Text("Settings").font(Typography.callout)
-                        }
-                        .foregroundStyle(accent)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.islandFlat)
-                    Spacer()
-                }
-            }
-            .padding(.horizontal, Spacing.xxl)
-            .padding(.top, Spacing.xxl)
-            .padding(.bottom, Spacing.lg)
+            headerBar(category.title, back: "Settings") { selected = nil }
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Spacing.xxl) {
@@ -186,12 +237,61 @@ struct SettingsView: View {
                     case .weather: weatherControls
                     case .timers: timersControls
                     case .notifications: notificationControls
+                    case .tweaks: tweaksControls
                     }
                 }
                 .padding(.horizontal, Spacing.xxl)
                 .padding(.bottom, Spacing.xxl)
             }
             .smoothScrollBounce()
+        }
+    }
+
+    /// A detail-page title bar: centred title with a leading "‹ <back>" button.
+    /// Shared by every detail and sub-page so they all step back identically.
+    private func headerBar(_ title: String, back backTitle: String,
+                           action: @escaping () -> Void) -> some View {
+        ZStack {
+            Text(title).font(Typography.bodyStrong).foregroundStyle(Palette.textPrimary)
+            HStack {
+                Button(action: action) {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "chevron.left").font(.system(size: IconSize.sm, weight: .bold))
+                        Text(backTitle).font(Typography.callout)
+                    }
+                    .foregroundStyle(accent)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.islandFlat)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, Spacing.xxl)
+        .padding(.top, Spacing.xxl)
+        .padding(.bottom, Spacing.lg)
+    }
+
+    // MARK: Tweaks (Settings → Tweaks → App Volume / EQ & Spatial)
+
+    /// The Tweaks category detail: a small list pushing to each tweak's own page.
+    private var tweaksControls: some View {
+        VStack(spacing: Spacing.md) {
+            ForEach(TweakPage.allCases) { tweak in
+                NavCard(icon: tweak.icon, title: tweak.title,
+                        subtitle: tweak.subtitle, accent: accent) { selectedTweak = tweak }
+            }
+        }
+    }
+
+    /// A Tweaks sub-page (App Volume or EQ & Spatial), reached from `tweaksControls`.
+    @ViewBuilder
+    private func tweakDetail(_ tweak: TweakPage) -> some View {
+        VStack(spacing: 0) {
+            headerBar(tweak.title, back: "Tweaks") { selectedTweak = nil }
+            switch tweak {
+            case .appVolume: AppVolumePage(store: controller.appVolumeStore, accent: accent)
+            case .equalizer: EqSpatialPage(store: controller.appVolumeStore, accent: accent)
+            }
         }
     }
 
@@ -423,5 +523,94 @@ struct SettingsView: View {
             .labelsHidden()
             .pickerStyle(.segmented)
         }
+    }
+}
+
+/// The per-app volume detail page: a row per app (sound-producing first, then MRU)
+/// with a draggable volume slider and a mute toggle. (Settings → Tweaks → App Volume.)
+private struct AppVolumePage: View {
+    @ObservedObject var store: AppVolumeStore
+    let accent: Color
+
+    var body: some View {
+        if store.apps.isEmpty {
+            VStack(spacing: Spacing.sm) {
+                Image(systemName: "speaker.slash")
+                    .font(.system(size: IconSize.xxl))
+                    .foregroundStyle(Palette.textFaint)
+                Text("No apps running")
+                    .font(Typography.footnote)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: Spacing.md) {
+                    ForEach(store.apps) { app in
+                        AppVolumeRow(app: app, store: store, accent: accent)
+                    }
+                }
+                .padding(.horizontal, Spacing.xl)
+                .padding(.bottom, Spacing.xxl)
+            }
+            .smoothScrollBounce()
+        }
+    }
+}
+
+/// One app's volume row, with a hover highlight (background lift + icon swell).
+private struct AppVolumeRow: View {
+    let app: AppVolumeItem
+    @ObservedObject var store: AppVolumeStore
+    let accent: Color
+    @State private var hovering = false
+
+    var body: some View {
+        let muted = app.setting.muted
+        return HStack(spacing: Spacing.xl) {
+            if let icon = app.icon {
+                Image(nsImage: icon).resizable().frame(width: 28, height: 28)
+                    .opacity(muted ? 0.5 : 1)
+                    .scaleEffect(hovering ? 1.08 : 1)
+            }
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.sm) {
+                    Text(app.name)
+                        .font(Typography.caption)
+                        .foregroundStyle(muted ? Palette.textSecondary : Palette.textPrimary)
+                        .lineLimit(1)
+                    if app.isPlaying {
+                        Image(systemName: "waveform")
+                            .font(.system(size: IconSize.xs, weight: .semibold))
+                            .foregroundStyle(accent)
+                    }
+                    Spacer(minLength: 0)
+                }
+                Slider(value: Binding(
+                    get: { app.setting.volume },
+                    set: { v in
+                        if app.setting.muted { store.setMuted(false, for: app.bundleID) }
+                        store.setVolume(v, for: app.bundleID)
+                    }), in: 0...1)
+                    .controlSize(.small)
+                    .tint(muted ? Palette.textFaint : accent)
+            }
+            Button { store.toggleMuted(for: app.bundleID) } label: {
+                Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: IconSize.sm, weight: .semibold))
+                    .foregroundStyle(muted ? accent : Palette.textSecondary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Palette.surfaceSubtle))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.island)
+        }
+        .padding(.vertical, Spacing.sm)
+        .padding(.horizontal, Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+            .fill(hovering ? Palette.surface : .clear))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .animation(Motion.hover, value: hovering)
     }
 }
