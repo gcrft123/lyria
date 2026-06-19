@@ -15,8 +15,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Toolchain selection mirrors build.sh: the macOS 26/27 SDK turns SwiftUI's
 # @State/@Binding into macros that need Xcode's compiler plugin + matching SDK.
 XCODE_DEV="$(xcode-select -p 2>/dev/null || true)"
-if [[ "$XCODE_DEV" != *"/Xcode"*".app/"* && -d "/Applications/Xcode.app/Contents/Developer" ]]; then
-	XCODE_DEV="/Applications/Xcode.app/Contents/Developer"
+# If xcode-select points at the Command Line Tools (no macro plugin), find an
+# Xcode bundle — a release Xcode.app first, then any Xcode*.app (e.g. Xcode-beta).
+if [[ "$XCODE_DEV" != *"/Xcode"*".app/"* ]]; then
+	for cand in /Applications/Xcode.app /Applications/Xcode*.app; do
+		if [[ -d "$cand/Contents/Developer" ]]; then
+			XCODE_DEV="$cand/Contents/Developer"
+			break
+		fi
+	done
 fi
 XCODE_SWIFTC="$XCODE_DEV/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
 XCODE_SDK="$XCODE_DEV/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
