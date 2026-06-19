@@ -1,3 +1,4 @@
+import AppKit
 import AudioToolbox
 import CoreAudio
 import Foundation
@@ -28,11 +29,13 @@ struct RhythmSnapshot {
 /// glow.
 ///
 /// Apple Music exposes no tempo or onset data over ScriptingBridge, so instead
-/// of guessing we listen to the *actual* system audio. Using the modern Core
-/// Audio process-tap API (macOS 14.4+) we tap the global output mix into a
-/// private aggregate device, then run a lightweight envelope + energy-based
-/// onset detector on the audio callback thread. The view reads a thread-safe
-/// `snapshot()` each frame to size and pulse the glow to the music.
+/// of guessing we listen to the *actual* audio. Using the modern Core Audio
+/// process-tap API (macOS 14.4+) we tap **Apple Music's** output (a per-process
+/// mixdown, not the whole system) into a private aggregate device, then run a
+/// lightweight envelope + energy-based onset detector on the audio callback
+/// thread. The view reads a thread-safe `snapshot()` each frame to size and pulse
+/// the glow to the music — so notification dings, video, and other apps never
+/// drive it.
 ///
 /// Audio-only — it never touches the screen-recording permission. If the tap
 /// can't be created (older OS, capture permission denied, no tappable output),
@@ -121,9 +124,21 @@ final class AudioRhythmMonitor {
         guard #available(macOS 14.4, *) else { log("macOS < 14.4 — synthetic fallback"); return }
         log("starting…")
 
-        // 1. Tap the global output mix (exclude nothing → whole system), without
-        //    muting what the user hears.
-        let tapDescription = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        // 1. Tap ONLY Apple Music's audio (not the whole system mix), so the glow
+        //    pulses to the track and ignores notification dings, video, other apps,
+        //    etc. The pulse only ever runs while Music is the active app AND playing
+        //    (see `beatPulseActive`), so Music is running here and its audio process
+        //    object resolves; if it somehow can't, fall back to the synthetic clock.
+        guard let musicPID = NSWorkspace.shared.runningApplications
+                .first(where: { $0.bundleIdentifier == "com.apple.Music" })?
+                .processIdentifier,
+              let musicObject = Self.audioProcessObject(for: musicPID) else {
+            log("Apple Music audio process not found — synthetic fallback")
+            return
+        }
+        // `stereoMixdownOfProcesses` mixes just the listed process(es) into the tap.
+        // `.unmuted` so Music still plays out the speakers — we only observe it.
+        let tapDescription = CATapDescription(stereoMixdownOfProcesses: [musicObject])
         tapDescription.name = "DynamicIslandRhythmTap"
         tapDescription.isPrivate = true
         tapDescription.muteBehavior = .unmuted
@@ -200,7 +215,7 @@ final class AudioRhythmMonitor {
         }
 
         started = true
-        log("LIVE — tapping system audio")
+        log("LIVE — tapping Apple Music audio")
         os_unfair_lock_lock(lock)
         running = true
         os_unfair_lock_unlock(lock)
@@ -229,6 +244,24 @@ final class AudioRhythmMonitor {
         tapID = AudioObjectID(kAudioObjectUnknown)
 
         started = false
+    }
+
+    /// Translate a process id into its Core Audio process object, so we can build a
+    /// per-process tap for just that app. Returns nil if the process has no audio
+    /// object (e.g. it isn't running or has never produced audio).
+    @available(macOS 14.2, *)
+    private static func audioProcessObject(for pid: pid_t) -> AudioObjectID? {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var inPID = pid
+        var object = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = AudioObjectGetPropertyData(
+            system, &addr, UInt32(MemoryLayout<pid_t>.size), &inPID, &size, &object)
+        return status == noErr && object != AudioObjectID(kAudioObjectUnknown) ? object : nil
     }
 
     // MARK: Read (main thread, once per frame)
