@@ -60,12 +60,18 @@ struct SongRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            ArtworkView(image: song.artwork, size: 40, cornerRadius: Radius.sm)
-            VStack(alignment: .leading, spacing: Spacing.hairline) {
-                Text(song.title).font(Typography.calloutStrong).foregroundStyle(Palette.textPrimary).lineLimit(1)
-                Text(song.artist).font(Typography.footnote).foregroundStyle(Palette.textSecondary).lineLimit(1)
+            // Only the artwork + title region taps to play, so it doesn't swallow the
+            // trailing buttons' taps (which was eating the favorite/menu clicks).
+            HStack(spacing: Spacing.md) {
+                ArtworkView(image: song.artwork, size: 40, cornerRadius: Radius.sm)
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
+                    Text(song.title).font(Typography.calloutStrong).foregroundStyle(Palette.textPrimary).lineLimit(1)
+                    Text(song.artist).font(Typography.footnote).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                }
+                Spacer(minLength: Spacing.sm)
             }
-            Spacer(minLength: Spacing.sm)
+            .contentShape(Rectangle())
+            .onTapGesture { store.playSong(song) }
             SongMenu(store: store, song: song, onGoToAlbum: onGoToAlbum)
             FavoriteButton(isFavorited: store.isFavorited(song), size: IconSize.md) { store.toggleFavorite(song) }
             rowIconButton("play.fill", tint: Palette.textPrimary) { store.playSong(song) }
@@ -74,8 +80,6 @@ struct SongRow: View {
         .padding(.horizontal, Spacing.sm)
         .background(RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
             .fill(hovering ? Palette.surface : .clear))
-        .contentShape(Rectangle())
-        .onTapGesture { store.playSong(song) }
         .onHover { hovering = $0 }
         .animation(Motion.hover, value: hovering)
     }

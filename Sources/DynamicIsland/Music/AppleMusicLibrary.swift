@@ -100,10 +100,13 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
         }
         var result: [MusicCollection] = []
         for album in order.prefix(60) {
+            // One cover per album — reuse it for every song row (they're all this album).
+            let cover = Self.artwork(in: tracks, at: firstIndex[album] ?? 0)
+            let songs = (grouped[album] ?? []).map { song -> MusicSong in
+                var s = song; s.artwork = cover; return s
+            }
             result.append(MusicCollection(id: "lal:\(album)", kind: .album, title: album,
-                                          subtitle: subtitle[album] ?? "",
-                                          artwork: Self.artwork(in: tracks, at: firstIndex[album] ?? 0),
-                                          date: nil, songs: grouped[album] ?? []))
+                                          subtitle: subtitle[album] ?? "", artwork: cover, date: nil, songs: songs))
         }
         cachedAlbums = result
         return result
@@ -127,9 +130,9 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
         return collection.songs
     }
 
-    /// MUST run on `queue`. A user playlist's tracks (re-resolved by id). No per-track
-    /// artwork (reading hundreds of KVC images per open is too slow — the hero cover
-    /// stands in); rows show the placeholder.
+    /// MUST run on `queue`. A user playlist's tracks (re-resolved by id), each with
+    /// its own cover. Capped at 100 — reading per-track KVC artwork is the slow part,
+    /// so very long playlists are truncated to keep the detail open responsive.
     private func loadPlaylistTracks(persistentID pid: String) -> [MusicSong] {
         guard let app, app.isRunning, let lists = app.userPlaylists() else { return [] }
         for i in 0..<lists.count {
@@ -137,7 +140,7 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
             guard (obj.value(forKey: "persistentID") as? String) == pid,
                   let tracks = obj.value(forKey: "tracks") as? SBElementArray else { continue }
             var songs: [MusicSong] = []
-            for t in 0..<min(tracks.count, 300) {
+            for t in 0..<min(tracks.count, 100) {
                 let e = tracks.object(at: t) as AnyObject
                 let title = e.value(forKey: "name") as? String ?? ""
                 guard !title.isEmpty else { continue }
@@ -146,7 +149,7 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
                                        title: title,
                                        artist: e.value(forKey: "artist") as? String ?? "",
                                        album: album, albumID: album.isEmpty ? nil : "lal:\(album)",
-                                       artwork: nil,
+                                       artwork: Self.firstArtwork(of: e),
                                        duration: e.value(forKey: "duration") as? Double ?? 0,
                                        isFavorited: (e.value(forKey: "favorited") as? NSNumber)?.boolValue ?? false))
             }

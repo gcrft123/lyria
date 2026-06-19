@@ -12,6 +12,8 @@ protocol MusicIslandProvider: IslandContentProvider {
     func toggleShuffle()
     func cycleRepeat()
     func toggleFavorite()
+    /// Play the upcoming-queue track at `index` (its position in the current playlist).
+    func playQueueTrack(at index: Int)
 }
 
 /// Mirrors Apple Music onto the island.
@@ -29,6 +31,10 @@ final class MusicPlayerProvider: MusicIslandProvider {
     private let bridge = MusicBridge()
     private var pollTimer: Timer?
     private var distributedObserver: NSObjectProtocol?
+    /// A just-toggled favorite (track id + desired value) held until a poll confirms
+    /// Music applied it — the write is async, so an immediate re-read can still see
+    /// the old value and otherwise flip the heart back.
+    private var pendingFavorite: (id: String, value: Bool)?
 
     /// Poll cadence. While something is PLAYING we poll fast to keep the scrubber
     /// honest; when paused/stopped/nothing we back off, since position isn't moving
@@ -81,9 +87,19 @@ final class MusicPlayerProvider: MusicIslandProvider {
         // The read runs off the main thread; the completion is delivered on main.
         bridge.snapshot { [weak self] snapshot in
             guard let self else { return }
-            self.controller?.updateNowPlaying(snapshot)
+            var snap = snapshot
+            // Keep the optimistic favorite until Music confirms it (or the track changes).
+            if let pending = self.pendingFavorite {
+                if var s = snap, s.trackID == pending.id {
+                    if s.isFavorited == pending.value { self.pendingFavorite = nil }
+                    else { s.isFavorited = pending.value; snap = s }
+                } else {
+                    self.pendingFavorite = nil
+                }
+            }
+            self.controller?.updateNowPlaying(snap)
             // Match the poll cadence to playback state.
-            self.schedulePoll(snapshot?.isPlaying == true ? self.activeInterval : self.idleInterval)
+            self.schedulePoll(snap?.isPlaying == true ? self.activeInterval : self.idleInterval)
         }
     }
 
@@ -180,11 +196,19 @@ final class MusicPlayerProvider: MusicIslandProvider {
     }
 
     func toggleFavorite() {
+        let id = controller?.nowPlaying?.trackID ?? ""
         let next = !(controller?.nowPlaying?.isFavorited ?? false)
         optimistic { $0.isFavorited = next }
+        pendingFavorite = (id, next)
         guard !useMock else { return }
         bridge.setFavorited(next)
         scheduleSync()
+    }
+
+    func playQueueTrack(at index: Int) {
+        guard !useMock else { return }
+        bridge.playQueueTrack(at: index)
+        scheduleSync(after: 0.2)
     }
 
     // MARK: Mock

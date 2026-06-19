@@ -788,6 +788,7 @@ final class DynamicIslandController: ObservableObject {
     func toggleShuffle() { musicProvider?.toggleShuffle() }
     func cycleRepeat() { musicProvider?.cycleRepeat() }
     func toggleFavorite() { musicProvider?.toggleFavorite() }
+    func playQueueItem(_ track: QueueTrack) { musicProvider?.playQueueTrack(at: track.id) }
 
     // MARK: Deep links
 
