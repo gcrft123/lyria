@@ -31,6 +31,19 @@ final class DynamicIslandController: ObservableObject {
     /// Per-app volume tweak: app list + persisted settings + the audio engine.
     let appVolumeStore: AppVolumeStore
 
+    /// The Calculator app's engine (display + history). Its view observes it
+    /// directly; nothing controller-derived depends on it, so it needs no re-publish.
+    let calculator = CalculatorEngine()
+
+    /// Backs the Music app's Search + Library tabs. Real Apple Music (playlists via
+    /// ScriptingBridge, Search via the iTunes catalog) unless `DI_MOCK_MUSIC=1`, which
+    /// uses the static mock catalog (screenshots/dev). The views observe it directly.
+    let musicLibrary: MusicLibraryStore = {
+        let useMock = ProcessInfo.processInfo.environment["DI_MOCK_MUSIC"] == "1"
+        let library: MusicLibrary = useMock ? MockMusicLibrary() : AppleMusicLibrary()
+        return MusicLibraryStore(library: library)
+    }()
+
     /// Whether the pointer is currently over the island.
     @Published private(set) var isHovered: Bool = false
 
@@ -181,7 +194,7 @@ final class DynamicIslandController: ObservableObject {
         case "calendar", "cal": return .calendar
         case "weather": return .weather
         case "dashboard", "dash", "home": return .dashboard
-        case "tweaks": return .tweaks
+        case "calculator", "calc": return .calculator
         default: return nil
         }
     }()
@@ -214,7 +227,8 @@ final class DynamicIslandController: ObservableObject {
         weatherManager.significantChange
             .sink { [weak self] in self?.flashWeather() }
             .store(in: &cancellables)
-        // The app-volume list / settings re-render the Tweaks page.
+        // The app-volume list re-renders the Settings → Tweaks page, and its
+        // `eqPageActive` flag drives the settings card height — re-publish with it.
         appVolumeStore.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -371,7 +385,10 @@ final class DynamicIslandController: ObservableObject {
         case .expanded(let app):
             return IslandGeometry(size: expandedSize(app), cornerRadius: c.expandedCornerRadius)
         case .settings:
-            let s = CGSize(width: c.expandedTotalWidth, height: c.settingsHeight)
+            // Settings shares the standard height, but its Tweaks → EQ & Spatial
+            // sub-page needs the taller card (same as the old standalone Tweaks app).
+            let h = appVolumeStore.eqPageActive ? c.tweaksEQHeight : c.settingsHeight
+            let s = CGSize(width: c.expandedTotalWidth, height: h)
             return IslandGeometry(size: s, cornerRadius: c.expandedCornerRadius)
         case .popup:
             // Grows a little on hover to signal it's clickable.
@@ -396,7 +413,7 @@ final class DynamicIslandController: ObservableObject {
         case .timers: return CGSize(width: configuration.timerCompactWidth, height: configuration.compactHeight)
         case .weather: return CGSize(width: configuration.weatherCompactWidth, height: configuration.compactHeight)
         case .dashboard: return CGSize(width: configuration.dashboardCompactWidth, height: configuration.compactHeight)
-        case .tweaks: return CGSize(width: configuration.tweaksCompactWidth, height: configuration.compactHeight)
+        case .calculator: return CGSize(width: configuration.calculatorCompactWidth, height: configuration.compactHeight)
         }
     }
 
@@ -414,10 +431,8 @@ final class DynamicIslandController: ObservableObject {
             return CGSize(width: c.expandedTotalWidth, height: c.weatherExpandedHeight)
         case .dashboard:
             return CGSize(width: c.expandedTotalWidth, height: c.dashboardExpandedHeight)
-        case .tweaks:
-            // The EQ & Spatial detail page grows the card; everything else stays 324.
-            let height = appVolumeStore.eqPageActive ? c.tweaksEQHeight : c.tweaksExpandedHeight
-            return CGSize(width: c.expandedTotalWidth, height: height)
+        case .calculator:
+            return CGSize(width: c.expandedTotalWidth, height: c.calculatorExpandedHeight)
         }
     }
 
@@ -752,6 +767,11 @@ final class DynamicIslandController: ObservableObject {
         guard volumeRevealed != revealed else { return }
         volumeRevealed = revealed
     }
+
+    /// Tap-toggle the Now Playing volume row (the speaker icon). The tabbed Music
+    /// layout drives volume by tapping the speaker rather than the old geometry-based
+    /// hover zone (which the tab bar's offset would have invalidated).
+    func toggleVolumeReveal() { setVolumeRevealed(!volumeRevealed) }
 
     func setHoveredControl(_ control: HoverableControl) {
         guard hoveredControl != control else { return }

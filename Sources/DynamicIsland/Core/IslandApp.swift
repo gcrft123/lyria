@@ -13,7 +13,7 @@ enum IslandApp: String, CaseIterable, Equatable, Identifiable {
     case music
     case timers
     case weather
-    case tweaks
+    case calculator
 
     var id: String { rawValue }
 
@@ -31,7 +31,7 @@ enum IslandApp: String, CaseIterable, Equatable, Identifiable {
         case .music: return 2
         case .timers: return 3
         case .weather: return 4
-        case .tweaks: return 5
+        case .calculator: return 6
         }
     }
 
@@ -47,7 +47,7 @@ enum IslandApp: String, CaseIterable, Equatable, Identifiable {
         case .timers: return 2
         case .calendar: return 3
         case .weather: return 4
-        case .tweaks: return 5
+        case .calculator: return 5
         }
     }
 
@@ -59,7 +59,7 @@ enum IslandApp: String, CaseIterable, Equatable, Identifiable {
         case .music: return "music.note"
         case .timers: return "timer"
         case .weather: return "cloud.sun.fill"
-        case .tweaks: return "slider.horizontal.3"
+        case .calculator: return "plus.forwardslash.minus"
         }
     }
 
@@ -70,7 +70,7 @@ enum IslandApp: String, CaseIterable, Equatable, Identifiable {
         case .music: return "Music"
         case .timers: return "Timers"
         case .weather: return "Weather"
-        case .tweaks: return "Tweaks"
+        case .calculator: return "Calculator"
         }
     }
 
@@ -83,7 +83,7 @@ enum IslandApp: String, CaseIterable, Equatable, Identifiable {
         case .music: return Palette.neutralAccent
         case .timers: return Palette.tintTimers
         case .weather: return Palette.tintWeather
-        case .tweaks: return Palette.tintTweaks
+        case .calculator: return Palette.tintCalculator
         }
     }
 }

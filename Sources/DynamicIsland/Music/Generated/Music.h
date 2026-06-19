@@ -68,6 +68,10 @@ typedef NS_ENUM(NSInteger, MusicERpt) {
 @property MusicERpt songRepeat;
 @property (copy, readonly) id<MusicTrack> currentTrack;
 @property (copy, readonly) id<MusicPlaylist> currentPlaylist;
+// The user's own playlists (excludes the system Library/Music/purchased lists).
+// Element properties (name, persistentID, tracks, artworks) are read via KVC, the
+// same way the now-playing queue reads its track elements.
+- (SBElementArray *) userPlaylists;
 - (void) playpause;       // toggle play/pause
 - (void) nextTrack;
 - (void) previousTrack;

@@ -124,20 +124,19 @@ struct IslandConfiguration {
     /// layout is compressed to fit; `DI_DASH_PROTO=1…4` selects a layout variant.
     var dashboardExpandedHeight: CGFloat = 324
 
-    // MARK: Tweaks app geometry
+    // MARK: Calculator app geometry
 
-    /// Compact tweaks pill (only via `DI_FORCE_APP=tweaks` — Tweaks isn't
-    /// auto-active; it's reached from the sidebar).
-    var tweaksCompactWidth: CGFloat = 300
+    /// Compact calculator pill (only via `DI_FORCE_APP=calculator` — Calculator
+    /// isn't auto-active; it's reached from the sidebar). Shows the live value.
+    var calculatorCompactWidth: CGFloat = 300
 
-    /// Expanded Tweaks card height — the shared 324 standard for the list and the
-    /// App Volume page (so switching is a clean cross-fade, no sparse whitespace).
-    var tweaksExpandedHeight: CGFloat = 324
+    /// Expanded calculator card height — the shared STANDARD 324, so switching to it
+    /// from any other app is a pure cross-fade with no resize.
+    var calculatorExpandedHeight: CGFloat = 324
 
-    /// The EQ & Spatial detail page needs real vertical room (presets row + 5-band
-    /// sliders + pan, or the spatial stage); 324 visibly compresses it, so that page
-    /// alone grows the card to this height (the controller picks it when it's open).
-    var tweaksEQHeight: CGFloat = 416
+    /// Width of the history sidebar, carved out of the shared `expandedWidth` (the
+    /// keypad fills the remainder, with a 1px divider between).
+    var calculatorHistoryWidth: CGFloat = 188
 
     // MARK: Settings card geometry
 
@@ -145,6 +144,12 @@ struct IslandConfiguration {
     /// STANDARD 324 (see `expandedHeight`) so opening settings is a pure cross-fade
     /// with no resize; its content scrolls if it needs more room.
     var settingsHeight: CGFloat = 324
+
+    /// The Settings → Tweaks → "EQ & Spatial" sub-page needs real vertical room
+    /// (presets row + 5-band sliders + pan, or the spatial stage); the standard 324
+    /// visibly compresses it, so that page alone grows the settings card to this
+    /// height (the controller picks it when `appVolumeStore.eqPageActive`).
+    var tweaksEQHeight: CGFloat = 416
 
     // MARK: Popup (notification / live-activity) geometry
 

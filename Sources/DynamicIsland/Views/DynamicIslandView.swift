@@ -235,8 +235,8 @@ struct DynamicIslandView: View {
             return IslandApp.weather.tint
         case .dashboard:
             return IslandApp.dashboard.tint
-        case .tweaks:
-            return IslandApp.tweaks.tint
+        case .calculator:
+            return IslandApp.calculator.tint
         case nil:
             // Settings / idle: fall back to the music accent if any.
             return controller.nowPlaying.map { settings.accent(for: $0) } ?? .clear
@@ -293,8 +293,8 @@ struct DynamicIslandView: View {
             WeatherCompactView(controller: controller, weather: controller.weatherManager)
         case .dashboard:
             DashboardCompactView(controller: controller)
-        case .tweaks:
-            TweaksCompactView(controller: controller)
+        case .calculator:
+            CalculatorCompactView(controller: controller, calculator: controller.calculator)
         }
     }
 
@@ -322,7 +322,7 @@ struct DynamicIslandView: View {
         case .calendar:
             CalendarExpandedView(controller: controller, calendar: controller.calendarManager)
         case .music:
-            ExpandedPlayerView(controller: controller)
+            MusicView(controller: controller)
         case .timers:
             TimerExpandedView(controller: controller, timers: controller.timerManager)
         case .weather:
@@ -332,8 +332,8 @@ struct DynamicIslandView: View {
                           timers: controller.timerManager,
                           calendar: controller.calendarManager,
                           weather: controller.weatherManager)
-        case .tweaks:
-            TweaksView(controller: controller, store: controller.appVolumeStore)
+        case .calculator:
+            CalculatorView(controller: controller, calculator: controller.calculator)
         }
     }
 

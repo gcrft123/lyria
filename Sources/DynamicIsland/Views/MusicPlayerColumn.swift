@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The Music player's column of rows — the SINGLE source of truth, used both by
-/// the full Music app (`ExpandedPlayerView`, with the volume speaker + reveal)
-/// and by the Dashboard's "music mirror" (`showsVolume: false`).
+/// the full Music app (`MusicView`'s Now Playing tab, with the volume speaker +
+/// reveal) and by the Dashboard's "music mirror" (`showsVolume: false`).
 ///
 /// Keeping it in ONE place is the standard: the full player and the dashboard
 /// mirror must never drift in spacing, color, glyph size, or row layout. Row
@@ -13,8 +13,15 @@ struct MusicPlayerColumn: View {
     /// The full player shows the volume speaker icon + slide-down volume row;
     /// the dashboard mirror has no volume control.
     var showsVolume: Bool = true
+    /// Vertical gap between rows. Defaults to the standard `expandedRowSpacing`
+    /// (Dashboard mirror + full-height use); the tabbed Now Playing passes a tighter
+    /// value so the player fits beneath the tab bar within the 324 card.
+    var rowSpacing: CGFloat? = nil
+    /// Top/bottom inset. Defaults to `expandedVMargin`; tighter under the tab bar.
+    var vMargin: CGFloat? = nil
 
     @State private var seekHovered = false
+    @State private var volumeRowHovered = false
 
     private var config: IslandConfiguration { controller.configuration }
     private var settings: AppSettings { controller.settings }
@@ -24,7 +31,7 @@ struct MusicPlayerColumn: View {
 
     var body: some View {
         if let np = controller.nowPlaying {
-            VStack(spacing: config.expandedRowSpacing) {
+            VStack(spacing: rowSpacing ?? config.expandedRowSpacing) {
                 topRow(np)
                 progressRow(np)
                 transportRow(np)
@@ -35,7 +42,7 @@ struct MusicPlayerColumn: View {
                 bottomRow(np)
             }
             .padding(.horizontal, config.expandedHMargin)
-            .padding(.vertical, config.expandedVMargin)
+            .padding(.vertical, vMargin ?? config.expandedVMargin)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .buttonStyle(.island)
             // Animate the volume reveal in step with the card's height morph.
@@ -90,7 +97,7 @@ struct MusicPlayerColumn: View {
             VStack(spacing: Spacing.sm) {
                 ProgressBarView(
                     elapsed: elapsed, duration: np.duration, accent: tint(np),
-                    isHovered: seekHovered || controller.hoveredControl == .progress,
+                    isHovered: seekHovered,
                     onCommit: { controller.seek(to: $0) }
                 )
                 .onHover { seekHovered = $0 }
@@ -115,15 +122,19 @@ struct MusicPlayerColumn: View {
                 transportButton(np.isPlaying ? "pause.fill" : "play.fill", glyphSize: IconSize.xxxl) { controller.playPause() }
                 transportButton("forward.fill", glyphSize: IconSize.xl) { controller.nextTrack() }
             }
-            // The volume speaker icon (full player only) — hovering it reveals the
-            // bar, handled by the window controller's polling.
+            // The volume speaker icon (full player only) — TAP it to toggle the
+            // slide-down volume row (the old hover-zone reveal didn't survive the
+            // tab bar's vertical offset).
             if showsVolume {
                 HStack {
-                    Image(systemName: volumeSymbol(np.volume))
-                        .font(.system(size: IconSize.lg))
-                        .foregroundStyle(volumeShown ? tint(np) : Palette.textSecondary)
-                        .frame(width: 30, height: config.transportRowHeight, alignment: .leading)
-                        .contentShape(Rectangle())
+                    Button(action: { controller.toggleVolumeReveal() }) {
+                        Image(systemName: volumeSymbol(np.volume))
+                            .font(.system(size: IconSize.lg))
+                            .foregroundStyle(volumeShown ? tint(np) : Palette.textSecondary)
+                            .frame(width: 30, height: config.transportRowHeight, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.island)
                     Spacer()
                 }
             }
@@ -137,10 +148,11 @@ struct MusicPlayerColumn: View {
         VolumeSliderView(
             volume: np.volume,
             accent: tint(np),
-            isHovered: controller.hoveredControl == .volume,
+            isHovered: volumeRowHovered,
             onChange: { controller.setVolume(to: $0) }
         )
         .frame(height: config.volumeRowHeight)
+        .onHover { volumeRowHovered = $0 }
     }
 
     private func bottomRow(_ np: NowPlaying) -> some View {
