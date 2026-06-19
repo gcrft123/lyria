@@ -140,7 +140,8 @@ struct MusicView: View {
                 MusicPlayerColumn(controller: controller, rowSpacing: Spacing.xxxl, vMargin: Spacing.md)
                     .frame(width: config.musicPlayerWidth)
                 Rectangle().fill(Palette.hairlineStroke).frame(width: 1).padding(.vertical, Spacing.lg)
-                QueueSidebar(queue: controller.nowPlaying?.queue ?? [])
+                QueueSidebar(queue: controller.nowPlaying?.queue ?? [],
+                             onPlay: { controller.playQueueItem($0) })
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.island)

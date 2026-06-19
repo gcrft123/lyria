@@ -240,4 +240,20 @@ final class MusicBridge: @unchecked Sendable {
             track.favorited = value
         }
     }
+
+    /// Play the upcoming-queue track at `index` (0-based position in the current
+    /// playlist; AppleScript is 1-based). Used by the tappable Up Next sidebar.
+    func playQueueTrack(at index: Int) {
+        queue.async {
+            let source = """
+            tell application "Music"
+                try
+                    play track \(index + 1) of current playlist
+                end try
+            end tell
+            """
+            var error: NSDictionary?
+            NSAppleScript(source: source)?.executeAndReturnError(&error)
+        }
+    }
 }
