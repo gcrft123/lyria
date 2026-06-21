@@ -29,6 +29,14 @@ func runMusicLibraryTests() {
     expect(d.topResults.first?.title.lowercased().hasPrefix("d") == true,
            "a title-prefix match leads the Top Results")
 
+    // Library song pool = every album's songs (so songs not in a surfaced album are
+    // still findable), and seeded favorites surface as filled hearts in search.
+    let libSongs = awaitValue { await lib.librarySongs() }
+    expectEqual(libSongs.count, albums.reduce(0) { $0 + $1.songs.count }, "library song pool = all album songs")
+    expect(libSongs.contains { $0.isFavorited }, "library exposes seeded favorites")
+    expect(dreams.songs.first { $0.title == "Dreams" }?.isFavorited == true,
+           "a favorited song reads as favorited in search results")
+
     // No match → empty.
     let none = awaitValue { await lib.search("zzqq-nothing") }
     expect(none.isEmpty, "no matches → empty results")

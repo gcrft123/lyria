@@ -19,7 +19,7 @@ struct MusicLibraryView: View {
     private var playlists: [MusicCollection] { filtered(store.playlists) }
     private var albums: [MusicCollection] { filtered(store.albums) }
     private var songs: [MusicSong] {
-        let all = store.albums.flatMap(\.songs)
+        let all = store.librarySongs
         guard !query.isEmpty else { return all }
         return all.filter {
             $0.title.lowercased().contains(query)
@@ -29,7 +29,7 @@ struct MusicLibraryView: View {
     }
 
     var body: some View {
-        if store.playlists.isEmpty && store.albums.isEmpty {
+        if store.playlists.isEmpty && store.albums.isEmpty && store.librarySongs.isEmpty {
             prompt("square.stack", "Your playlists and albums will appear here")
         } else if playlists.isEmpty && albums.isEmpty && songs.isEmpty {
             prompt("magnifyingglass", "Nothing in your library matches “\(filter)”")

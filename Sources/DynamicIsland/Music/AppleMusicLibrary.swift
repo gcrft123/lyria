@@ -21,6 +21,14 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
     private var cachedApp: SBApplication?
     private var cachedPlaylists: [MusicCollection]?
     private var cachedAlbums: [MusicCollection]?
+    private var cachedLibrarySongs: [MusicSong]?
+    /// Lookups (built with `cachedLibrarySongs`) for resolving a catalog search hit to
+    /// a saved library track: normalised title → matches, normalised album → artists.
+    private var songIndex: [String: [LibRef]] = [:]
+    private var albumIndex: [String: [String]] = [:]
+
+    /// A saved library track's identity for matching a catalog hit against it.
+    private struct LibRef { let artist: String; let favorited: Bool; let persistentID: String }
 
     /// System/special playlists that leak into `userPlaylists` and aren't real
     /// user playlists (the reported stray "Music" entry, etc.).
@@ -39,7 +47,15 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
     }
 
     func albums() async -> [MusicCollection] {
-        await withCheckedContinuation { cont in queue.async { cont.resume(returning: self.loadAlbums()) } }
+        await withCheckedContinuation { cont in
+            queue.async { self.ensureLibraryLoaded(); cont.resume(returning: self.cachedAlbums ?? []) }
+        }
+    }
+
+    func librarySongs() async -> [MusicSong] {
+        await withCheckedContinuation { cont in
+            queue.async { self.ensureLibraryLoaded(); cont.resume(returning: self.cachedLibrarySongs ?? []) }
+        }
     }
 
     /// MUST run on `queue`. The user's playlists (name, id, cover) via KVC. Covers
@@ -64,12 +80,25 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
         return result
     }
 
-    /// MUST run on `queue`. Derive albums from the whole library: bulk-read each
-    /// column in one Apple Event, group by album name, cover from each album's first
-    /// track. Capped at 60 albums (with covers) to bound a large library.
-    private func loadAlbums() -> [MusicCollection] {
-        if let cachedAlbums { return cachedAlbums }
-        guard let tracks = libraryTracks(), tracks.count > 0 else { cachedAlbums = []; return [] }
+    /// Cap on the bulk library pass — bounds work + memory on very large libraries.
+    private static let libraryTrackCap = 6000
+
+    /// MUST run on `queue`. One bulk pass over the library that fills BOTH
+    /// `cachedAlbums` (≤60 grouped albums with covers) and `cachedLibrarySongs` (the
+    /// full song list, so search/Library find songs that aren't in a surfaced album).
+    ///
+    /// Each text property is bulk-read in one Apple Event (`value(forKey:)`); these
+    /// columns are mutually aligned. **Artwork is read the SAME way** — via an
+    /// aligned `artworks` column — NOT via `object(at:)`. ScriptingBridge's
+    /// `object(at:)` ordering can differ from `value(forKey:)` ordering, so the old
+    /// `object(at:)` cover lookup paired each album with the WRONG track's art (text
+    /// was right, covers were scrambled). Reading artwork through `value(forKey:)`
+    /// keeps it index-aligned with the album column.
+    private func ensureLibraryLoaded() {
+        if cachedAlbums != nil { return }
+        guard let tracks = libraryTracks(), tracks.count > 0 else {
+            cachedAlbums = []; cachedLibrarySongs = []; return
+        }
         let names = Self.stringColumn(tracks, "name")
         let albumCol = Self.stringColumn(tracks, "album")
         let artistCol = Self.stringColumn(tracks, "artist")
@@ -77,39 +106,132 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
         let pidCol = Self.stringColumn(tracks, "persistentID")
         let durCol = Self.doubleColumn(tracks, "duration")
         let favCol = Self.boolColumn(tracks, "favorited")
+        // Artwork relationships, read the SAME way as the text columns so they align.
+        let artCol = (tracks.value(forKey: "artworks") as? [Any]) ?? []
 
+        func str(_ c: [String], _ i: Int) -> String { i < c.count ? c[i] : "" }
+        let count = min(names.count, Self.libraryTrackCap)
+
+        // Pass 1 — album order + each album's first row (for its cover) + subtitle.
         var order: [String] = []
-        var grouped: [String: [MusicSong]] = [:]
         var firstIndex: [String: Int] = [:]
         var subtitle: [String: String] = [:]
-        for i in 0..<albumCol.count {
+        for i in 0..<min(albumCol.count, Self.libraryTrackCap) {
             let album = albumCol[i]
-            guard !album.isEmpty else { continue }
-            if grouped[album] == nil {
-                order.append(album); firstIndex[album] = i
-                let aa = i < albumArtistCol.count ? albumArtistCol[i] : ""
-                subtitle[album] = aa.isEmpty ? (i < artistCol.count ? artistCol[i] : "") : aa
+            guard !album.isEmpty, firstIndex[album] == nil else { continue }
+            order.append(album); firstIndex[album] = i
+            let aa = str(albumArtistCol, i)
+            subtitle[album] = aa.isEmpty ? str(artistCol, i) : aa
+        }
+        // Covers for up to 60 albums, realised (the `data` read) only for those rows.
+        // The per-track entry is the `artworks` relationship — usually an
+        // SBElementArray, but tolerate a plain array too.
+        func cover(at i: Int) -> NSImage? {
+            guard i >= 0, i < artCol.count else { return nil }
+            if let arts = artCol[i] as? SBElementArray, arts.count > 0 {
+                return (arts.object(at: 0) as AnyObject).value(forKey: "data") as? NSImage
             }
-            grouped[album, default: []].append(MusicSong(
-                id: i < pidCol.count ? pidCol[i] : "\(i)",
-                title: i < names.count ? names[i] : "",
-                artist: i < artistCol.count ? artistCol[i] : "",
-                album: album, albumID: "lal:\(album)", artwork: nil,
+            if let arts = artCol[i] as? [Any], let first = arts.first {
+                return (first as AnyObject).value(forKey: "data") as? NSImage
+            }
+            return nil
+        }
+        var albumCover: [String: NSImage] = [:]
+        for album in order.prefix(60) {
+            if let img = cover(at: firstIndex[album] ?? -1) { albumCover[album] = img }
+        }
+
+        // Pass 2 — the full song list (no per-song artwork pull; reuse album covers).
+        var songs: [MusicSong] = []
+        songs.reserveCapacity(count)
+        for i in 0..<count {
+            let title = str(names, i)
+            guard !title.isEmpty else { continue }
+            let album = str(albumCol, i)
+            let pid = str(pidCol, i)
+            songs.append(MusicSong(
+                id: pid.isEmpty ? "\(i)" : pid,
+                title: title, artist: str(artistCol, i),
+                album: album, albumID: album.isEmpty ? nil : "lal:\(album)",
+                artwork: album.isEmpty ? nil : albumCover[album],
                 duration: i < durCol.count ? durCol[i] : 0,
                 isFavorited: i < favCol.count ? favCol[i] : false))
         }
-        var result: [MusicCollection] = []
-        for album in order.prefix(60) {
-            // One cover per album — reuse it for every song row (they're all this album).
-            let cover = Self.artwork(in: tracks, at: firstIndex[album] ?? 0)
-            let songs = (grouped[album] ?? []).map { song -> MusicSong in
-                var s = song; s.artwork = cover; return s
-            }
-            result.append(MusicCollection(id: "lal:\(album)", kind: .album, title: album,
-                                          subtitle: subtitle[album] ?? "", artwork: cover, date: nil, songs: songs))
+        cachedLibrarySongs = songs
+
+        // Albums (≤60), each with its songs filtered from the full list.
+        var byAlbum: [String: [MusicSong]] = [:]
+        for s in songs where !s.album.isEmpty { byAlbum[s.album, default: []].append(s) }
+        cachedAlbums = order.prefix(60).map { album in
+            MusicCollection(id: "lal:\(album)", kind: .album, title: album,
+                            subtitle: subtitle[album] ?? "", artwork: albumCover[album],
+                            date: nil, songs: byAlbum[album] ?? [])
         }
-        cachedAlbums = result
-        return result
+
+        // Indices for resolving catalog search hits against the library.
+        var sIndex: [String: [LibRef]] = [:]
+        var aIndex: [String: [String]] = [:]
+        for s in songs {
+            let key = Self.matchKey(s.title)
+            if !key.isEmpty {
+                sIndex[key, default: []].append(
+                    LibRef(artist: s.artist.lowercased(), favorited: s.isFavorited, persistentID: s.id))
+            }
+            if !s.album.isEmpty {
+                let ak = Self.matchKey(s.album)
+                if !ak.isEmpty { aIndex[ak, default: []].append(s.artist.lowercased()) }
+            }
+        }
+        songIndex = sIndex
+        albumIndex = aIndex
+    }
+
+    // MARK: Catalog-hit → library resolution (pure Swift, against the loaded library)
+
+    /// Normalised key for fuzzy title/album matching: lowercased, with version/feature
+    /// suffixes trimmed so a catalog title matches its (often suffixed) library copy
+    /// — e.g. "Dreams (2004 Remaster)" and "Dreams - Single Version" both key to
+    /// "dreams". This is the fix for favorited songs whose exact titles didn't match.
+    private static func matchKey(_ s: String) -> String {
+        var t = s.lowercased()
+        for sep in [" - ", " (", " [", " feat", " ft."] {
+            if let r = t.range(of: sep) { t = String(t[..<r.lowerBound]) }
+        }
+        return t.trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func artistMatches(_ a: String, _ b: String) -> Bool {
+        if a.isEmpty || b.isEmpty { return true }
+        return a.contains(b) || b.contains(a)
+    }
+
+    /// MUST run on `queue`. Match catalog songs to saved library tracks: song id →
+    /// (persistent ID, favorited). Absent ⇒ not in the library.
+    private func resolveSongs(_ songs: [MusicSong]) -> [String: (libraryID: String, favorited: Bool)] {
+        ensureLibraryLoaded()
+        guard !songIndex.isEmpty else { return [:] }
+        var out: [String: (String, Bool)] = [:]
+        for s in songs where s.id.hasPrefix("sg:") {
+            guard let cands = songIndex[Self.matchKey(s.title)] else { continue }
+            let a = s.artist.lowercased()
+            if let m = cands.first(where: { Self.artistMatches($0.artist, a) }) {
+                out[s.id] = (m.persistentID, m.favorited)
+            }
+        }
+        return out
+    }
+
+    /// MUST run on `queue`. The ids of catalog albums that are in the library.
+    private func resolveAlbums(_ albums: [MusicCollection]) -> Set<String> {
+        ensureLibraryLoaded()
+        guard !albumIndex.isEmpty else { return [] }
+        var out: Set<String> = []
+        for c in albums where c.id.hasPrefix("al:") {
+            guard let artists = albumIndex[Self.matchKey(c.title)] else { continue }
+            let a = c.subtitle.lowercased()
+            if artists.contains(where: { Self.artistMatches($0, a) }) { out.insert(c.id) }
+        }
+        return out
     }
 
     func songs(in collection: MusicCollection) async -> [MusicSong] {
@@ -121,7 +243,10 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
         }
         if collection.id.hasPrefix("lal:") {
             return await withCheckedContinuation { cont in
-                queue.async { cont.resume(returning: self.loadAlbums().first { $0.id == collection.id }?.songs ?? collection.songs) }
+                queue.async {
+                    self.ensureLibraryLoaded()
+                    cont.resume(returning: self.cachedAlbums?.first { $0.id == collection.id }?.songs ?? collection.songs)
+                }
             }
         }
         if collection.id.hasPrefix("al:") {
@@ -178,8 +303,21 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
         guard !q.isEmpty else { return .empty }
         async let songsTask = Self.catalogSongs(q)
         async let albumsTask = Self.catalogAlbums(q)
-        let songs = await songsTask
-        let albums = await albumsTask
+        var songs = await songsTask
+        var albums = await albumsTask
+        // Resolve the catalog hits against the saved library (pure-Swift match against
+        // the loaded song list — reliable, no fragile per-search AppleScript). This
+        // sets in-library status (drives the open-in-Music vs play UI), the real
+        // favorited state (filled hearts), and the persistent ID so play/favorite
+        // drive the exact saved track.
+        let (songStatus, albumsInLibrary) = await withCheckedContinuation { cont in
+            queue.async { cont.resume(returning: (self.resolveSongs(songs), self.resolveAlbums(albums))) }
+        }
+        songs = songs.map { s in
+            guard let m = songStatus[s.id] else { return s }
+            var x = s; x.inLibrary = true; x.libraryID = m.libraryID; x.isFavorited = m.favorited; return x
+        }
+        albums = albums.map { c in var x = c; x.inLibrary = albumsInLibrary.contains(c.id); return x }
         let lc = q.lowercased()
         let matching = await playlists().filter { $0.title.lowercased().contains(lc) }
         return SearchResults(topResults: Array(songs.prefix(3)), albums: albums, songs: songs, playlists: matching)
@@ -198,7 +336,8 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
                         album: r["collectionName"] as? String ?? "",
                         albumID: (r["collectionId"] as? NSNumber).map { "al:\($0.stringValue)" },
                         artwork: art,
-                        duration: ((r["trackTimeMillis"] as? NSNumber)?.doubleValue ?? 0) / 1000))
+                        duration: ((r["trackTimeMillis"] as? NSNumber)?.doubleValue ?? 0) / 1000,
+                        inLibrary: false))   // resolved against the library in `search`
                 }
             }
             var out: [(Int, MusicSong)] = []
@@ -217,7 +356,7 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
                     return (i, MusicCollection(
                         id: "al:\((r["collectionId"] as? NSNumber)?.stringValue ?? "\(i)")", kind: .album,
                         title: r["collectionName"] as? String ?? "", subtitle: r["artistName"] as? String ?? "",
-                        artwork: art, date: date, songs: []))
+                        artwork: art, date: date, songs: [], inLibrary: false))   // resolved in `search`
                 }
             }
             var out: [(Int, MusicCollection)] = []
@@ -280,49 +419,54 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
             end tell
             """)
         } else if collection.id.hasPrefix("lal:") {
-            let album = Self.esc(String(collection.id.dropFirst(4)))
-            runScript("""
-            tell application "Music"
-                set shuffle enabled to \(shuffled ? "true" : "false")
-                try
-                    set theTracks to (every track of library playlist 1 whose album is "\(album)")
-                    if theTracks is not {} then play (item 1 of theTracks)
-                end try
-            end tell
-            """)
+            // Library album (derived) — its id is "lal:<albumName>".
+            playAlbum(title: String(collection.id.dropFirst(4)), artist: collection.subtitle,
+                      shuffled: shuffled) { [self] in openInAppleMusic(collection: collection) }
         } else {
-            openInAppleMusic(collection: collection)   // catalog-only album
+            // Catalog (Apple Music-wide) album. It may be in the user's library —
+            // match it by title+artist and play it; only open in Music if it isn't.
+            playAlbum(title: collection.title, artist: collection.subtitle,
+                      shuffled: shuffled) { [self] in openInAppleMusic(collection: collection) }
         }
     }
 
-    func playSong(_ song: MusicSong) {
-        if song.id.hasPrefix("sg:") {
-            // A catalog hit might still be in the user's library — play it if so,
-            // otherwise open it in Apple Music (scripting can't play catalog-only items).
-            playLibraryMatch(name: song.title, artist: song.artist) { [self] in openInAppleMusic(song: song) }
-        } else {
-            runScript("""
-            tell application "Music"
-                try
-                    play (some track of library playlist 1 whose persistent ID is "\(Self.esc(song.id))")
-                end try
-            end tell
-            """)
-        }
-    }
-
-    /// Play the first library track matching name+artist; run `fallback` (on main)
-    /// when there's no match (it's catalog-only).
-    private func playLibraryMatch(name: String, artist: String, fallback: @escaping () -> Void) {
+    /// Play a library album located by Music's indexed `search` (the fast in-app
+    /// search engine), starting from its lowest track number. Avoids
+    /// `whose album is "…"`, which makes Music walk every track and beachballs large
+    /// libraries (the reported freeze). Falls back to opening in Music when the album
+    /// isn't in the library (catalog-only). `artist` is matched tolerantly so a
+    /// catalog hit still resolves to the library copy.
+    private func playAlbum(title: String, artist: String, shuffled: Bool, fallback: @escaping () -> Void) {
+        guard !title.isEmpty else { fallback(); return }
         queue.async {
+            let t = Self.esc(title)
+            let a = Self.esc(artist)
             let source = """
             tell application "Music"
-                set matches to (every track of library playlist 1 whose name is "\(Self.esc(name))" and artist is "\(Self.esc(artist))")
-                if matches is not {} then
-                    play (item 1 of matches)
-                    return "1"
-                end if
-                return "0"
+                set didPlay to "0"
+                try
+                    set hits to (search library playlist 1 for "\(t)" only albums)
+                    set best to missing value
+                    set bestNum to 1000000
+                    repeat with h in hits
+                        if (album of h) is "\(t)" then
+                            if ("\(a)" is "") or ((album artist of h) contains "\(a)") or ((artist of h) contains "\(a)") or ("\(a)" contains (artist of h)) then
+                                set n to (track number of h)
+                                if n is 0 then set n to 999999
+                                if n < bestNum then
+                                    set bestNum to n
+                                    set best to h
+                                end if
+                            end if
+                        end if
+                    end repeat
+                    if best is not missing value then
+                        set shuffle enabled to \(shuffled ? "true" : "false")
+                        play best
+                        set didPlay to "1"
+                    end if
+                end try
+                return didPlay
             end tell
             """
             var error: NSDictionary?
@@ -331,12 +475,35 @@ final class AppleMusicLibrary: MusicLibrary, @unchecked Sendable {
         }
     }
 
-    func toggleFavorite(_ song: MusicSong) {
-        guard !song.id.hasPrefix("sg:") else { return }   // not in the library → can't favorite via scripting
+    func playSong(_ song: MusicSong) {
+        if let lid = song.libraryID {
+            playLibraryTrack(persistentID: lid)        // catalog hit resolved to a saved track
+        } else if song.id.hasPrefix("sg:") {
+            openInAppleMusic(song: song)               // catalog-only — not in the library
+        } else {
+            playLibraryTrack(persistentID: song.id)    // library-sourced song
+        }
+    }
+
+    private func playLibraryTrack(persistentID pid: String) {
         runScript("""
         tell application "Music"
             try
-                set theTrack to (some track of library playlist 1 whose persistent ID is "\(Self.esc(song.id))")
+                play (some track of library playlist 1 whose persistent ID is "\(Self.esc(pid))")
+            end try
+        end tell
+        """)
+    }
+
+    func toggleFavorite(_ song: MusicSong) {
+        // Only library tracks can be favorited via scripting. For a catalog hit that's
+        // the resolved persistent ID; a catalog-only song (no libraryID) is a no-op.
+        let pid: String? = song.libraryID ?? (song.id.hasPrefix("sg:") ? nil : song.id)
+        guard let pid else { return }
+        runScript("""
+        tell application "Music"
+            try
+                set theTrack to (some track of library playlist 1 whose persistent ID is "\(Self.esc(pid))")
                 set favorited of theTrack to (not (favorited of theTrack))
             end try
         end tell

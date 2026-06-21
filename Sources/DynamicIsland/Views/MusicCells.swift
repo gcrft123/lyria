@@ -16,8 +16,13 @@ struct CollectionCoverCell: View {
                 ArtworkView(image: collection.artwork, size: width, cornerRadius: Radius.md)
                     .contentShape(Rectangle())
                     .onTapGesture { onOpen() }
-                coverPlayButton { store.play(collection) }
-                    .padding(Spacing.xs)
+                // In-library → play; a catalog hit that isn't saved → open in Apple Music.
+                if collection.inLibrary {
+                    coverPlayButton { store.play(collection) }.padding(Spacing.xs)
+                } else {
+                    coverPlayButton(symbol: "arrow.up.forward.app") { store.openInAppleMusic(collection) }
+                        .padding(Spacing.xs)
+                }
             }
             HStack(alignment: .top, spacing: Spacing.xs) {
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
@@ -27,17 +32,19 @@ struct CollectionCoverCell: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { onOpen() }
-                CollectionMenu(store: store, collection: collection)
+                // The more menu's actions (play/shuffle/favorite) only apply to saved items.
+                if collection.inLibrary { CollectionMenu(store: store, collection: collection) }
             }
         }
         .frame(width: width)
     }
 }
 
-/// A play disc overlaid on a cover's corner.
-func coverPlayButton(action: @escaping () -> Void) -> some View {
+/// A play disc overlaid on a cover's corner (or an "open in Apple Music" disc for a
+/// catalog item that isn't in the library).
+func coverPlayButton(symbol: String = "play.fill", action: @escaping () -> Void) -> some View {
     Button(action: action) {
-        Image(systemName: "play.fill")
+        Image(systemName: symbol)
             .font(.system(size: IconSize.sm, weight: .bold))
             .foregroundStyle(Palette.onAccent)
             .frame(width: 26, height: 26)
@@ -71,10 +78,16 @@ struct SongRow: View {
                 Spacer(minLength: Spacing.sm)
             }
             .contentShape(Rectangle())
-            .onTapGesture { store.playSong(song) }
-            SongMenu(store: store, song: song, onGoToAlbum: onGoToAlbum)
-            FavoriteButton(isFavorited: store.isFavorited(song), size: IconSize.md) { store.toggleFavorite(song) }
-            rowIconButton("play.fill", tint: Palette.textPrimary) { store.playSong(song) }
+            .onTapGesture { song.inLibrary ? store.playSong(song) : store.openInAppleMusic(song) }
+            // Favorite/more apply only to saved songs; a catalog hit that isn't in the
+            // library shows a single "open in Apple Music" action instead of play.
+            if song.inLibrary {
+                SongMenu(store: store, song: song, onGoToAlbum: onGoToAlbum)
+                FavoriteButton(isFavorited: store.isFavorited(song), size: IconSize.md) { store.toggleFavorite(song) }
+                rowIconButton("play.fill", tint: Palette.textPrimary) { store.playSong(song) }
+            } else {
+                rowIconButton("arrow.up.forward.app", tint: Palette.textPrimary) { store.openInAppleMusic(song) }
+            }
         }
         .padding(.vertical, Spacing.xs)
         .padding(.horizontal, Spacing.sm)
