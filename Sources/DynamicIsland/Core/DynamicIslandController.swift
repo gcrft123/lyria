@@ -132,18 +132,10 @@ final class DynamicIslandController: ObservableObject {
         activePopup != nil || activeHUD != nil || Date() < popupImmuneUntil
     }
 
-    /// While in the future, Weather briefly takes over the compact notch: a
-    /// severe-weather alert or a condition change just landed (see
-    /// `WeatherManager.significantChange`). It's a glanceable, compact-only
-    /// takeover — it sits below popups/HUD and yields to hover (hovering during
-    /// the flash expands Weather, since that's what the pill is showing).
-    private var weatherFlashUntil: Date = .distantPast
-    private var weatherFlashWork: DispatchWorkItem?
-    /// How long the weather flash lingers in the notch.
-    private let weatherFlashDuration: TimeInterval = 10
-
-    /// True while the weather flash owns the compact notch.
-    var weatherFlashActive: Bool { Date() < weatherFlashUntil }
+    /// Identity of the calendar event we last popped a notification for, so an
+    /// event only notifies once when it enters the imminent window (the manager
+    /// republishes every tick while it stays imminent).
+    private var lastNotifiedCalendarEventID: String?
 
     /// Static layout/behaviour settings.
     let configuration: IslandConfiguration
@@ -163,6 +155,11 @@ final class DynamicIslandController: ObservableObject {
     /// — used by mirrored system notifications, which carry a `launchBundleID`
     /// rather than an internal `IslandApp`. Wired by the host to NSWorkspace.
     var onPopupLaunchBundle: ((String) -> Void)?
+
+    /// Hook for "open this URL" on left-click — used by status live activities to
+    /// deep-link into System Settings (e.g. a battery notification opens the
+    /// Battery pane). Wired by the host to NSWorkspace.
+    var onPopupOpenURL: ((String) -> Void)?
 
     /// Debug: DI_FORCE_EXPANDED=1 pins the expanded layout; DI_FORCE_VOLUME=1
     /// also reveals the volume bar; DI_FORCE_SETTINGS=1 pins the settings page.
@@ -215,17 +212,21 @@ final class DynamicIslandController: ObservableObject {
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &cancellables)
         // Calendar events (and an event becoming / ceasing to be imminent) change
-        // the hierarchy and the live activity, so re-publish with the manager.
+        // the hierarchy, so re-publish with the manager — and pop a notification
+        // when an event newly becomes imminent.
         calendarManager.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
+            .sink { [weak self] in
+                self?.objectWillChange.send()
+                self?.notifyCalendarImminent()
+            }
             .store(in: &cancellables)
         // A new weather reading re-renders the weather views.
         weatherManager.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &cancellables)
-        // A severe alert / condition change briefly promotes Weather to the notch.
+        // A severe alert / condition change pops a Weather notification.
         weatherManager.significantChange
-            .sink { [weak self] in self?.flashWeather() }
+            .sink { [weak self] in self?.notifyWeatherChange() }
             .store(in: &cancellables)
         // The app-volume list re-renders the Settings → Tweaks page, and its
         // `eqPageActive` flag drives the settings card height — re-publish with it.
@@ -235,11 +236,16 @@ final class DynamicIslandController: ObservableObject {
         appVolumeStore.start()
 
         if forcePopup {
+            // A demo live-activity notification, so DI_FORCE_POPUP exercises the
+            // compact center-island look + hover-grow / left-click-opens / right-
+            // click-dismisses interaction.
             presentPopup(IslandPopup(id: "demo",
-                                     title: "John Bob",
-                                     message: "Do you want to get pizza?",
-                                     icon: .symbol("message.fill"),
-                                     accent: .blue))
+                                     style: .liveActivity,
+                                     title: "Weather",
+                                     message: "Heavy rain · 54°",
+                                     icon: .symbol("cloud.heavyrain.fill"),
+                                     app: .weather,
+                                     accent: IslandApp.weather.tint))
         }
         // Seed a persistent mock HUD for screenshots (set directly so it doesn't
         // auto-dismiss the way a real keypress-driven one does).
@@ -272,7 +278,7 @@ final class DynamicIslandController: ObservableObject {
     /// app; hovering opens the dashboard, from which the sidebar reaches each full
     /// app.)
     var displayedApp: IslandApp {
-        forcedApp ?? selectedApp ?? (weatherFlashActive ? .weather : nil) ?? .dashboard
+        forcedApp ?? selectedApp ?? .dashboard
     }
 
     /// The app filling the main island, for the purpose of deciding what spills
@@ -359,9 +365,6 @@ final class DynamicIslandController: ObservableObject {
             // slot while it's up — but only when NOT hovered, so hovering still
             // opens the island (it's already in the `!hovered` branch).
             if let activity = liveActivity { return .liveActivity(activity) }
-            // A severe alert / condition change briefly takes over the notch even
-            // when nothing else is active (so it can interrupt the idle pill too).
-            if weatherFlashActive { return .compact(.weather) }
             guard let top = topApp else { return .idle }
             return .compact(top)
         }
@@ -391,7 +394,14 @@ final class DynamicIslandController: ObservableObject {
             let s = CGSize(width: c.expandedTotalWidth, height: h)
             return IslandGeometry(size: s, cornerRadius: c.expandedCornerRadius)
         case .popup:
-            // Grows a little on hover to signal it's clickable.
+            // Grows a little on hover to signal it's clickable. A live-activity-style
+            // popup uses the compact center-island pill size (and full-rounded ends)
+            // instead of the banner card.
+            if activePopup?.style == .liveActivity {
+                let s = CGSize(width: popupHovered ? c.liveActivityPopupHoveredWidth : c.liveActivityPopupWidth,
+                               height: popupHovered ? c.liveActivityPopupHoveredHeight : c.liveActivityPopupHeight)
+                return IslandGeometry(size: s, cornerRadius: s.height / 2)
+            }
             let s = CGSize(width: popupHovered ? c.popupHoveredWidth : c.popupWidth,
                            height: popupHovered ? c.popupHoveredHeight : c.popupHeight)
             return IslandGeometry(size: s, cornerRadius: c.popupCornerRadius)
@@ -720,12 +730,24 @@ final class DynamicIslandController: ObservableObject {
     func activatePopup() {
         guard let popup = activePopup else { return }
         if let app = popup.app {
+            // Reveal the app in the island, but do NOT pin: clear the popup and its
+            // hover-immunity so the island simply expands to the app under the
+            // pointer and collapses normally once the pointer leaves. The window
+            // controller commits the expansion so it holds across expand triggers.
+            activePopup = nil
+            popupHovered = false
+            popupImmuneUntil = .distantPast
             selectApp(app)
             onPopupOpenApp?(app)
         } else if let bundleID = popup.launchBundleID {
             onPopupLaunchBundle?(bundleID)
+            dismissPopup()
+        } else if let url = popup.openURL {
+            onPopupOpenURL?(url)
+            dismissPopup()
+        } else {
+            dismissPopup()
         }
-        dismissPopup()
     }
 
     func setPopupHovered(_ hovered: Bool) {
@@ -733,19 +755,45 @@ final class DynamicIslandController: ObservableObject {
         popupHovered = hovered
     }
 
-    // MARK: Weather flash (severe alert / condition change)
+    // MARK: Notifications (weather change / imminent calendar event → popups)
 
-    /// Briefly promote Weather to the compact notch for `weatherFlashDuration`.
-    /// Driven by `WeatherManager.significantChange`. Re-arming refreshes the
-    /// window; a trailing nudge re-renders so the pill collapses when it lapses.
-    func flashWeather() {
-        guard settings.weatherFlashOnChange else { return }
-        weatherFlashUntil = Date().addingTimeInterval(weatherFlashDuration)
-        weatherFlashWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.objectWillChange.send() }
-        weatherFlashWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + weatherFlashDuration, execute: work)
-        objectWillChange.send()
+    /// Pop a Weather notification on a severe alert / condition change. As a popup
+    /// it grows on hover (no expand-and-crash); left-click opens the Weather app,
+    /// right-click (or the auto-dismiss) clears it.
+    func notifyWeatherChange() {
+        guard settings.weatherFlashOnChange, let snap = weatherManager.snapshot else { return }
+        presentPopup(IslandPopup(
+            id: "weather-change",
+            style: .liveActivity,
+            title: snap.locationName.isEmpty ? "Weather" : snap.locationName,
+            message: "\(snap.condition.description) · \(WeatherFormat.temp(snap.temperature))",
+            icon: .symbol(snap.condition.symbol),
+            app: .weather,
+            accent: IslandApp.weather.tint,
+            autoDismissAfter: 8))
+    }
+
+    /// Pop a Calendar notification when an event newly enters the imminent window
+    /// (edge-triggered off the manager's imminent-event identity). Left-click opens
+    /// the Calendar app; right-click (or the auto-dismiss) clears it.
+    func notifyCalendarImminent() {
+        let event = calendarManager.imminentEvent()
+        guard event?.id != lastNotifiedCalendarEventID else { return }
+        lastNotifiedCalendarEventID = event?.id
+        guard let event else { return }
+        let detail = event.location.map { "\(event.startTimeText) · \($0)" } ?? event.startTimeText
+        // Defer a tick: we're inside the calendar manager's willChange notification.
+        DispatchQueue.main.async { [weak self] in
+            self?.presentPopup(IslandPopup(
+                id: "calendar-\(event.id)",
+                style: .liveActivity,
+                title: event.title.isEmpty ? "Event" : event.title,
+                message: detail,
+                icon: .app(.calendar),
+                app: .calendar,
+                accent: IslandApp.calendar.tint,
+                autoDismissAfter: 12))
+        }
     }
 
     // MARK: System HUD (volume / brightness)

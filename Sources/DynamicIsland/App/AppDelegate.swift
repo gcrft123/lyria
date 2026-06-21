@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appearanceProvider = AppearanceProvider()
     private let displayProvider = DisplayProvider()
     private let wifiProvider = WiFiProvider()
+    private let batteryProvider = BatteryProvider()
     private var focusProvider: FocusProvider?
 
     // Alt+Tab window switcher (OS-wide): a global hot-key tap drives a switcher
@@ -76,6 +77,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
             else { return }
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+
+        // Left-clicking a status live activity opens its System Settings deep link
+        // (e.g. a battery notification opens the Battery pane).
+        controller.onPopupOpenURL = { urlString in
+            guard let url = URL(string: urlString) else { return }
+            NSWorkspace.shared.open(url)
         }
 
         // Restore system banners if we're asked to quit (logout, `kill`). Armed
@@ -223,6 +231,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.register(appearanceProvider); appearanceProvider.startObserving()
         controller.register(displayProvider); displayProvider.startObserving()
         controller.register(wifiProvider); wifiProvider.startObserving()
+
+        // Battery: charging / low-battery / Low Power Mode → status live activities.
+        controller.register(batteryProvider); batteryProvider.startObserving()
 
         // Focus / Do Not Disturb changes → Focus banner (reads the DND store; FDA).
         let focusProvider = FocusProvider(focusController: focusController)

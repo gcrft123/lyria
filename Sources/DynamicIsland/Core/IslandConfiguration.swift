@@ -163,6 +163,13 @@ struct IslandConfiguration {
     var popupHoveredHeight: CGFloat = 104
     var popupCornerRadius: CGFloat = 28
 
+    /// A `.liveActivity`-style popup (weather change / imminent calendar event): the
+    /// compact center-island pill, grown a touch on hover to signal it's clickable.
+    var liveActivityPopupWidth: CGFloat = 360
+    var liveActivityPopupHeight: CGFloat = 44
+    var liveActivityPopupHoveredWidth: CGFloat = 376
+    var liveActivityPopupHoveredHeight: CGFloat = 50
+
     // MARK: System HUD (volume / brightness) geometry
 
     /// The transient volume/brightness HUD that replaces the system overlay: a

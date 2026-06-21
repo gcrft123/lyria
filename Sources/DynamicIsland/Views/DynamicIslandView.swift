@@ -262,8 +262,24 @@ struct DynamicIslandView: View {
             expandedContainer(selected: controller.displayedApp) { expandedPane }
                 .transition(Self.contentTransition)
         case .popup(let popup):
-            PopupView(popup: popup, hovered: controller.popupHovered)
+            // A live-activity popup wears the compact center-island pill (with the
+            // popup's hover-grow / left-click-opens / right-click-dismisses
+            // interaction): an island app shows its own compact view; a system
+            // status event (battery / Wi-Fi / Bluetooth / Focus) shows a status
+            // pill. A banner popup is the modal notification card.
+            if popup.style == .liveActivity {
+                Group {
+                    if let app = popup.app {
+                        compactView(app)
+                    } else {
+                        StatusActivityView(popup: popup, hovered: controller.popupHovered)
+                    }
+                }
                 .transition(Self.contentTransition)
+            } else {
+                PopupView(popup: popup, hovered: controller.popupHovered)
+                    .transition(Self.contentTransition)
+            }
         case .hud(let hud):
             HUDView(hud: hud)
                 .transition(Self.contentTransition)

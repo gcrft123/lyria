@@ -96,7 +96,11 @@ struct WeatherExpandedView: View {
     // MARK: Hourly strip (on black)
 
     private func hourly(_ snap: WeatherSnapshot) -> some View {
-        HWheelScroll {
+        // A plain SwiftUI ScrollView, NOT HWheelScroll: nesting an NSScrollView +
+        // NSHostingView inside the island throws an Auto Layout exception during the
+        // hover-expand window resize (crashed when the Weather notification was
+        // hovered). The horizontal strip still drags / trackpad-swipes.
+        ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Spacing.xxs) {
                 ForEach(snap.hourly) { h in
                     VStack(spacing: Spacing.sm) {
@@ -124,6 +128,7 @@ struct WeatherExpandedView: View {
             .padding(.horizontal, Spacing.xxs)
         }
         .frame(height: 78)
+        .smoothScrollBounce()
     }
 
     // MARK: Daily list (on black)

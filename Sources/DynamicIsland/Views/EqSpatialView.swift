@@ -62,7 +62,9 @@ private struct DrawerStrip: View {
     let accent: Color
 
     var body: some View {
-        HWheelScroll {
+        // Plain SwiftUI ScrollView (not HWheelScroll): a nested NSScrollView throws an
+        // Auto Layout exception when the island/settings card resizes. See WeatherExpandedView.
+        ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Spacing.lg) {
                 ForEach(store.apps) { app in
                     let selected = app.bundleID == store.selectedApp?.bundleID
@@ -94,6 +96,7 @@ private struct DrawerStrip: View {
             .padding(.vertical, Spacing.hairline)
         }
         .frame(height: 50)
+        .smoothScrollBounce()
     }
 }
 
@@ -121,7 +124,7 @@ private struct EQTab: View {
             }
 
             // Presets — tap to apply a curve to the bands (highlighted when active).
-            HWheelScroll {
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Spacing.md) {
                     ForEach(EQPreset.all) { preset in
                         PresetChip(title: preset.name,
@@ -134,6 +137,7 @@ private struct EQTab: View {
                 .padding(.horizontal, Spacing.hairline).padding(.vertical, Spacing.hairline)
             }
             .frame(height: 30)
+            .smoothScrollBounce()
 
             HStack(spacing: 0) {
                 ForEach(0..<AppAudioEngine.bandCount, id: \.self) { i in
