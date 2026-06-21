@@ -24,7 +24,8 @@ struct MusicSearchView: View {
         if store.query.trimmingCharacters(in: .whitespaces).isEmpty {
             prompt("Search songs, albums, and playlists")
         } else if store.results.isEmpty {
-            prompt("No results for “\(store.query)”")
+            // Still fetching → show a spinner rather than flashing "No results".
+            if store.isSearching { loadingPrompt() } else { prompt("No results for “\(store.query)”") }
         } else {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -74,6 +75,14 @@ struct MusicSearchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, Spacing.xxl)
     }
+
+    private func loadingPrompt() -> some View {
+        VStack(spacing: Spacing.md) {
+            ProgressView().controlSize(.small)
+            Text("Searching…").font(Typography.footnote).foregroundStyle(Palette.textTertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 }
 
 /// A full-list page for a section's "see all": a grid of covers, or a song list.
@@ -113,7 +122,7 @@ struct MusicSeeAllView: View {
                     }
                     .padding(.bottom, Layout.musicMiniClearance)
                 } else {
-                    VStack(spacing: Spacing.xxs) {
+                    LazyVStack(spacing: Spacing.xxs) {
                         ForEach(data.songs) { s in
                             SongRow(store: store, song: s, accent: accent) { goToAlbum(s) }
                         }

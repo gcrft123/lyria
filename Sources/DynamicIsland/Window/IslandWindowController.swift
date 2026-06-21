@@ -260,10 +260,11 @@ final class IslandWindowController: NSObject {
         }
 
         // The whole island is hoverable — including the idle pill, so hovering it
-        // expands into the app sidebar. While editing a timer name we stay open
-        // regardless of where the pointer drifts.
-        let inside = controller.isEditing
-            || islandScreenRect(inflatedBy: activeHoverPadding).contains(location)
+        // expands into the app sidebar. `inside` tracks the POINTER itself (not the
+        // editing state): when the pointer clearly leaves while a text field is
+        // focused, the exit path below ends editing and lets the island collapse,
+        // rather than a focused field pinning it open forever.
+        let inside = islandScreenRect(inflatedBy: activeHoverPadding).contains(location)
 
         if inside {
             // Re-entered before the grace timer fired — cancel any pending
@@ -304,7 +305,10 @@ final class IslandWindowController: NSObject {
             // a short grace so a quick re-entry doesn't cause a flicker.
             panel.ignoresMouseEvents = true
             controller.setPinCornerHovered(false)
-            if controller.isHovered {
+            // Editing keeps the island expanded (so it stays open while you type with
+            // the pointer inside), so a focused field must also go through the grace
+            // timer on exit — that's what ends editing and unfocuses the field.
+            if controller.isHovered || controller.isEditing {
                 scheduleExitIfNeeded()
             } else {
                 expansionCommitted = false

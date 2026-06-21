@@ -7,12 +7,24 @@ import Foundation
 final class MusicLibraryStore: ObservableObject {
     @Published private(set) var playlists: [MusicCollection] = []
     @Published private(set) var albums: [MusicCollection] = []
+    /// The full library song pool (Library tab's Songs section + "Find in library…").
+    @Published private(set) var librarySongs: [MusicSong] = []
     @Published private(set) var results: SearchResults = .empty
     @Published private(set) var query: String = ""
     @Published private(set) var isSearching = false
     /// Optimistic favorite state by song id, so a tapped heart fills immediately
     /// (the real favorite is applied in Music asynchronously).
     @Published private(set) var favoriteOverrides: [String: Bool] = [:]
+
+    // Music app navigation, owned here (not in `MusicView`'s `@State`) so it survives
+    // the view being torn down on app switch / island collapse — returning to Music
+    // lands on the same screen instead of resetting to Now Playing.
+    @Published var tab: MusicTab = MusicTab.fromEnv(ProcessInfo.processInfo.environment["DI_MUSIC_TAB"]) ?? .nowPlaying
+    /// The tab bar's search / "Find in library…" field text.
+    @Published var fieldText: String = ""
+    /// Pushed sub-pages within the browse tabs (collection detail, "see all" list).
+    @Published var detail: MusicCollection?
+    @Published var seeAll: MusicSeeAllData?
 
     private let library: MusicLibrary
     private var searchTask: Task<Void, Never>?
@@ -27,6 +39,7 @@ final class MusicLibraryStore: ObservableObject {
         Task {
             playlists = await library.playlists()
             albums = await library.albums()
+            librarySongs = await library.librarySongs()
         }
     }
 
@@ -41,6 +54,9 @@ final class MusicLibraryStore: ObservableObject {
         searchTask = Task { [library] in
             try? await Task.sleep(nanoseconds: 200_000_000)   // debounce keystrokes
             if Task.isCancelled { return }
+            // `search` already reflects real library favorite state on its hits, so the
+            // rows render with the right heart on first paint (no late flip, which would
+            // make every favorited row fire its celebratory heart-burst on load).
             let r = await library.search(q)
             if Task.isCancelled { return }
             self.results = r

@@ -19,6 +19,7 @@ final class MockMusicLibrary: MusicLibrary {
 
     func playlists() async -> [MusicCollection] { catalogPlaylists }
     func albums() async -> [MusicCollection] { catalogAlbums }
+    func librarySongs() async -> [MusicSong] { allSongs }
     func songs(in collection: MusicCollection) async -> [MusicSong] { collection.songs }
 
     func search(_ query: String) async -> SearchResults {
@@ -84,8 +85,11 @@ final class MockMusicLibrary: MusicLibrary {
             let art = swatch(colors)
             let id = "album.\(index)"
             let songs = tracks.enumerated().map { ti, t in
+                // Seed a couple of favorites so the filled-heart state is visible in
+                // mock screenshots/tests.
                 MusicSong(id: "\(id).song.\(ti)", title: t.0, artist: artist,
-                          album: title, albumID: id, artwork: art, duration: TimeInterval(t.1))
+                          album: title, albumID: id, artwork: art, duration: TimeInterval(t.1),
+                          isFavorited: ti == 0 && index % 2 == 0)
             }
             return MusicCollection(id: id, kind: .album, title: title, subtitle: artist,
                                    artwork: art, date: nil, songs: songs)

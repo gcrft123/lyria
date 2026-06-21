@@ -43,23 +43,22 @@ enum MusicTab: String, CaseIterable, Identifiable {
 /// it returns to Now Playing.
 struct MusicView: View {
     @ObservedObject var controller: DynamicIslandController
+    /// Observed so the persisted nav state (tab / field / pushed pages) drives the UI.
+    @ObservedObject var store: MusicLibraryStore
 
-    @State private var tab: MusicTab =
-        MusicTab.fromEnv(ProcessInfo.processInfo.environment["DI_MUSIC_TAB"]) ?? .nowPlaying
-    @State private var query: String = ""
-    /// Sub-page navigation within the browse tabs (push/pop, like Settings).
-    @State private var detail: MusicCollection?
-    @State private var seeAll: MusicSeeAllData?
+    init(controller: DynamicIslandController) {
+        _controller = ObservedObject(wrappedValue: controller)
+        _store = ObservedObject(wrappedValue: controller.musicLibrary)
+    }
 
     private var config: IslandConfiguration { controller.configuration }
-    private var store: MusicLibraryStore { controller.musicLibrary }
     private var accent: Color {
         controller.nowPlaying.map { controller.settings.accent(for: $0) } ?? Palette.neutralAccent
     }
 
     var body: some View {
         VStack(spacing: Spacing.md) {
-            MusicTabBar(tab: $tab, query: $query, controller: controller)
+            MusicTabBar(tab: $store.tab, query: $store.fieldText, controller: controller)
                 .padding(.horizontal, Spacing.xl)
                 .padding(.top, Spacing.md)
 
@@ -67,8 +66,8 @@ struct MusicView: View {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 // The shrunken player, docked at the bottom on the browse tabs.
-                if tab != .nowPlaying, controller.nowPlaying != nil {
-                    MiniPlayerPill(controller: controller) { tab = .nowPlaying }
+                if store.tab != .nowPlaying, controller.nowPlaying != nil {
+                    MiniPlayerPill(controller: controller) { store.tab = .nowPlaying }
                         .padding(.horizontal, Spacing.xl)
                         .padding(.bottom, Spacing.md)
                         .transition(.move(edge: .bottom)
@@ -78,52 +77,52 @@ struct MusicView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(Motion.morph, value: tab)
-        .animation(Motion.transition, value: detail?.id)
-        .animation(Motion.transition, value: seeAll?.id)
+        .animation(Motion.morph, value: store.tab)
+        .animation(Motion.transition, value: store.detail?.id)
+        .animation(Motion.transition, value: store.seeAll?.id)
         .onAppear { store.loadIfNeeded() }
-        .onChange(of: tab) { newTab in
-            detail = nil; seeAll = nil
+        .onChange(of: store.tab) { newTab in
+            store.detail = nil; store.seeAll = nil
             // The volume row only lives in Now Playing — collapse it elsewhere so the
             // card height doesn't get stuck taller on the browse tabs.
             if newTab != .nowPlaying { controller.setVolumeRevealed(false) }
             // Each browse tab starts with a fresh field (Search and Library are independent).
-            store.clearSearch(); query = ""
+            store.clearSearch(); store.fieldText = ""
         }
-        .onChange(of: query) { q in
+        .onChange(of: store.fieldText) { q in
             // Typing in either browse field returns to its list; Search also hits the
             // store, while Library just filters its loaded lists client-side via `q`.
-            guard tab != .nowPlaying else { return }
-            detail = nil; seeAll = nil
-            if tab == .search { store.search(q) }
+            guard store.tab != .nowPlaying else { return }
+            store.detail = nil; store.seeAll = nil
+            if store.tab == .search { store.search(q) }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let detail {
+        if let detail = store.detail {
             MusicCollectionDetailView(store: store, collection: detail, accent: accent,
-                                      onBack: { self.detail = nil }, onGoToAlbum: goToAlbum)
-        } else if let seeAll {
+                                      onBack: { store.detail = nil }, onGoToAlbum: goToAlbum)
+        } else if let seeAll = store.seeAll {
             MusicSeeAllView(store: store, data: seeAll, accent: accent,
-                            onBack: { self.seeAll = nil }, openCollection: open, goToAlbum: goToAlbum)
+                            onBack: { store.seeAll = nil }, openCollection: open, goToAlbum: goToAlbum)
         } else {
-            switch tab {
+            switch store.tab {
             case .nowPlaying:
                 nowPlaying
             case .search:
                 MusicSearchView(store: store, accent: accent, openCollection: open,
-                                goToAlbum: goToAlbum, seeAll: { seeAll = $0 })
+                                goToAlbum: goToAlbum, seeAll: { store.seeAll = $0 })
             case .library:
-                MusicLibraryView(store: store, accent: accent, filter: query, openCollection: open,
-                                 goToAlbum: goToAlbum, seeAll: { seeAll = $0 })
+                MusicLibraryView(store: store, accent: accent, filter: store.fieldText, openCollection: open,
+                                 goToAlbum: goToAlbum, seeAll: { store.seeAll = $0 })
             }
         }
     }
 
     private func open(_ collection: MusicCollection) {
-        seeAll = nil
-        detail = collection
+        store.seeAll = nil
+        store.detail = collection
     }
 
     /// "Go to Album" from a song → its album detail (looked up in the loaded library).
@@ -132,21 +131,23 @@ struct MusicView: View {
     }
 
     /// The Now Playing tab: the shared player column (compacted to fit under the tab
-    /// bar) beside the Up Next queue — the only tab that shows Up Next.
+    /// bar). When there's an Up Next queue it sits beside the player; with no queue
+    /// the sidebar is dropped and the player fills the whole content width.
     @ViewBuilder
     private var nowPlaying: some View {
-        if controller.nowPlaying != nil {
+        if let np = controller.nowPlaying, !np.queue.isEmpty {
             HStack(spacing: Spacing.zero) {
                 MusicPlayerColumn(controller: controller, rowSpacing: Spacing.xxxl, vMargin: Spacing.md)
                     .frame(width: config.musicPlayerWidth)
                 Rectangle().fill(Palette.hairlineStroke).frame(width: 1).padding(.vertical, Spacing.lg)
-                QueueSidebar(queue: controller.nowPlaying?.queue ?? [],
-                             onPlay: { controller.playQueueItem($0) })
+                QueueSidebar(queue: np.queue, onPlay: { controller.playQueueItem($0) })
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.island)
         } else {
+            // No queue (or nothing playing) — the player spans the full width.
             MusicPlayerColumn(controller: controller, rowSpacing: Spacing.xxxl, vMargin: Spacing.md)
+                .buttonStyle(.island)
         }
     }
 
