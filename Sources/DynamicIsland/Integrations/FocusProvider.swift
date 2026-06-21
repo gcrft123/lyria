@@ -116,6 +116,7 @@ final class FocusProvider: IslandContentProvider {
     private func present(name: String, active: Bool, symbol: String) {
         controller?.presentPopup(IslandPopup(
             id: "focus.\(active ? "on" : "off")",
+            style: .liveActivity,
             title: name,
             message: active ? "On" : "Off",
             icon: .symbol(symbol),

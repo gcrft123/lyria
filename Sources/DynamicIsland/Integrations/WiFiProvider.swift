@@ -40,6 +40,7 @@ final class WiFiProvider: NSObject, IslandContentProvider, CWEventDelegate {
         if mockMode {
             controller?.presentPopup(IslandPopup(
                 id: "wifi.connected",
+                style: .liveActivity,
                 title: "Wi-Fi",
                 message: "Connected to “HomeNet”",
                 icon: .symbol("wifi"),
@@ -128,6 +129,7 @@ final class WiFiProvider: NSObject, IslandContentProvider, CWEventDelegate {
     private func present(message: String, symbol: String) {
         controller?.presentPopup(IslandPopup(
             id: "wifi.\(message)",
+            style: .liveActivity,
             title: "Wi-Fi",
             message: message,
             icon: .symbol(symbol),

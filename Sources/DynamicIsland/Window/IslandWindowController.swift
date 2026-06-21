@@ -87,7 +87,15 @@ final class IslandWindowController: NSObject {
         hosting.onMouseDown = { [weak self] in
             guard let self else { return false }
             if self.controller.activePopup != nil {
+                // A live-activity notification that opens an app reveals it under the
+                // pointer (NOT pinned): commit the expansion so it holds for any
+                // trigger, then collapses normally when the pointer leaves.
+                let opensApp = self.controller.activePopup?.app != nil
                 self.controller.activatePopup()
+                if opensApp {
+                    self.expansionCommitted = true
+                    self.controller.interactionHandler?.pointerDidEnter()
+                }
                 return true
             }
             // Click-to-expand: when that trigger is selected and the card is still

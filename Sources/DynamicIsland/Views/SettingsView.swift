@@ -441,7 +441,7 @@ struct SettingsView: View {
     private var weatherControls: some View {
         Group {
             toggleRow("Use Fahrenheit", systemImage: "thermometer.medium", isOn: $settings.weatherUseFahrenheit)
-            toggleRow("Flash on condition change", systemImage: "bolt.horizontal", isOn: $settings.weatherFlashOnChange)
+            toggleRow("Notify on condition change", systemImage: "bell", isOn: $settings.weatherFlashOnChange)
         }
     }
 

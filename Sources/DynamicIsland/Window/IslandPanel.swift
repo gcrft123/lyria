@@ -16,6 +16,13 @@ final class IslandPanel: NSPanel {
         isFloatingPanel = true
         level = configuration.windowLevel
 
+        // The island chrome is always dark (hand-styled with fixed palette colors),
+        // but native AppKit controls hosted inside (segmented pickers, sliders, menus)
+        // follow the panel's effective appearance. Pin it to dark so they don't render
+        // their unselected/secondary text in the light-mode (near-black) color, which
+        // is invisible on the dark card for anyone running the system in Light Mode.
+        appearance = NSAppearance(named: .darkAqua)
+
         // Transparent canvas — only the SwiftUI pill paints anything.
         backgroundColor = .clear
         isOpaque = false

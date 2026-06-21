@@ -42,6 +42,7 @@ final class BluetoothProvider: NSObject, IslandContentProvider {
         if mockMode {
             controller?.presentPopup(IslandPopup(
                 id: "mock-bluetooth",
+                style: .liveActivity,
                 title: "AirPods Pro",
                 message: "Connected",
                 icon: .symbol("airpodspro"),
@@ -99,6 +100,7 @@ final class BluetoothProvider: NSObject, IslandContentProvider {
         let name = device.name?.trimmingCharacters(in: .whitespacesAndNewlines)
         controller?.presentPopup(IslandPopup(
             id: "bt.\(key).\(message)",
+            style: .liveActivity,
             title: (name?.isEmpty == false ? name! : "Bluetooth Device"),
             message: message,
             icon: .symbol(Self.symbol(for: device)),
