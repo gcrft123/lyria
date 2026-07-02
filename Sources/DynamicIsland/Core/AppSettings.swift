@@ -141,6 +141,20 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(timerChimeRepeat, forKey: Key.timerChimeRepeat) }
     }
 
+    // MARK: Displays
+
+    /// Persistent UUIDs of displays the user has turned the island OFF for. Stored as
+    /// opt-outs (not the enabled set) so a newly-connected display shows the island by
+    /// default. Empty = the island may appear on every display.
+    @Published var islandDisplayOptOut: Set<String> {
+        didSet { defaults.set(Array(islandDisplayOptOut), forKey: Key.islandDisplayOptOut) }
+    }
+
+    /// Whether the island may appear on the display with this persistent id.
+    func showsIsland(onDisplay persistentID: String) -> Bool {
+        !islandDisplayOptOut.contains(persistentID)
+    }
+
     /// Allowed lead-time choices (minutes) for the calendar live activity.
     static let calendarLeadChoices = [5, 10, 15, 30]
 
@@ -164,6 +178,7 @@ final class AppSettings: ObservableObject {
         static let timerChimeRepeat = "timers.chimeRepeat"
         static let waveSensitivityPitch = "music.waveSensitivityPitch"
         static let waveSensitivityVolume = "music.waveSensitivityVolume"
+        static let islandDisplayOptOut = "displays.islandOptOut"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -203,6 +218,7 @@ final class AppSettings: ObservableObject {
             defaults.array(forKey: Key.waveSensitivityPitch) as? [Double], fallback: Self.defaultPitchCurve)
         waveSensitivityVolume = Self.sanitizedCurve(
             defaults.array(forKey: Key.waveSensitivityVolume) as? [Double], fallback: Self.defaultVolumeCurve)
+        islandDisplayOptOut = Set((defaults.array(forKey: Key.islandDisplayOptOut) as? [String]) ?? [])
     }
 
     // MARK: Derived

@@ -13,6 +13,10 @@ final class IslandWindowController: NSObject {
 
     private var hoverTimer: Timer?
 
+    /// The display the panel is currently anchored to (so the idle island only
+    /// re-anchors when the cursor's enabled display actually changes).
+    private var currentDisplayID: CGDirectDisplayID?
+
     /// Pending collapse, scheduled when the pointer leaves and cancelled if it
     /// comes back — see `updateHover`.
     private var exitWorkItem: DispatchWorkItem?
@@ -246,6 +250,8 @@ final class IslandWindowController: NSObject {
     }
 
     private func updateHover() {
+        // Multi-display: keep the idle island on the cursor's enabled screen.
+        followCursorIfIdle()
         let location = NSEvent.mouseLocation
 
         // Popups own the island and suppress hover-to-expand. While one is up we
@@ -468,6 +474,7 @@ final class IslandWindowController: NSObject {
     /// the view (`configuration.topInset`), leaving room for the shadow.
     private func reposition() {
         guard let screen = targetScreen() else { return }
+        currentDisplayID = DisplayCatalog.displayID(of: screen)
         let frame = screen.frame
         let origin = NSPoint(
             x: frame.midX - configuration.canvasWidth / 2,
@@ -476,14 +483,35 @@ final class IslandWindowController: NSObject {
         panel.setFrameOrigin(origin)
     }
 
-    /// Prefers a notched display (so the island sits at the notch); otherwise
-    /// falls back to the main display.
+    /// While the island is idle/compact, keep it on the display the cursor is using
+    /// (among the displays the user enabled) — so brightness/volume control and their
+    /// HUD land on that screen. Skipped while expanded / a popup / a HUD is up so the
+    /// island never hops out from under an interaction.
+    private func followCursorIfIdle() {
+        guard !controller.mode.isExpanded, controller.activePopup == nil, controller.activeHUD == nil,
+              let target = targetScreen(),
+              DisplayCatalog.displayID(of: target) != currentDisplayID
+        else { return }
+        reposition()
+    }
+
+    /// The screen the island should sit on: an enabled display under the cursor,
+    /// else a notched enabled display, else the main/first. Falls back to ALL screens
+    /// if the user has (somehow) turned every display off, so it never vanishes.
     private func targetScreen() -> NSScreen? {
-        if #available(macOS 12.0, *) {
-            if let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
-                return notched
-            }
+        let enabled = NSScreen.screens.filter { screen in
+            guard let id = DisplayCatalog.displayID(of: screen),
+                  let uuid = DisplayCatalog.persistentID(for: id) else { return true }
+            return controller.settings.showsIsland(onDisplay: uuid)
         }
-        return NSScreen.main ?? NSScreen.screens.first
+        let pool = enabled.isEmpty ? NSScreen.screens : enabled
+        if let underCursor = pool.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) {
+            return underCursor
+        }
+        if #available(macOS 12.0, *),
+           let notched = pool.first(where: { $0.safeAreaInsets.top > 0 }) {
+            return notched
+        }
+        return pool.first(where: { $0 == NSScreen.main }) ?? pool.first
     }
 }
