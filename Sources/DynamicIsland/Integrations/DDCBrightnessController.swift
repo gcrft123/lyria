@@ -66,6 +66,12 @@ final class DDCBrightnessController {
 
     private var services: [CGDirectDisplayID: CFTypeRef] = [:]
     private var didMap = false
+    /// Whether a benign DDC write to this display actually goes through. The service
+    /// resolving isn't enough: the OS/monitor can still reject the I2C (DDC/CI off in
+    /// the OSD, a hub/KVM stripping DDC, or a macOS build gating the DCP — the last of
+    /// which returns a DCP error for every write). We must not claim control in those
+    /// cases, or the HUD shows a change that never lands. Cached per display.
+    private var reachable: [CGDirectDisplayID: Bool] = [:]
     /// Cached brightness per display, in the display's own 0…max DDC units.
     private var level: [CGDirectDisplayID: Int] = [:]
     private var maxValue: [CGDirectDisplayID: Int] = [:]
@@ -86,9 +92,11 @@ final class DDCBrightnessController {
         }
     }
 
-    /// Whether this display can be driven over DDC right now.
+    /// Whether this display can be driven over DDC right now — a paired service AND
+    /// a benign probe write that the OS/monitor actually accepts.
     func canControl(_ display: CGDirectDisplayID) -> Bool {
-        Self.io != nil && service(for: display) != nil
+        guard Self.io != nil, let service = service(for: display) else { return false }
+        return reachableViaDDC(display, service: service)
     }
 
     /// The first external display we can drive over DDC, or `nil`. Used as a
@@ -96,7 +104,23 @@ final class DDCBrightnessController {
     /// (e.g. the cursor is on the built-in panel but the user wants the monitor).
     func firstControllableExternal() -> CGDirectDisplayID? {
         if !didMap { rebuildMap() }
-        return externalDisplays().first { services[$0] != nil }
+        return externalDisplays().first { canControl($0) }
+    }
+
+    /// Reachability probe: does a benign DDC write (a Get-VCP *request*, which
+    /// changes nothing) actually go through? A failing write (e.g. the DCP error
+    /// this returns on macOS builds that gate I2C) means we can't really control the
+    /// display, so `canControl` reports false and the caller falls back to the system
+    /// / DisplayServices instead of pretending. Cached per display; the write is a
+    /// single fast call.
+    private func reachableViaDDC(_ display: CGDirectDisplayID, service: CFTypeRef) -> Bool {
+        if let cached = reachable[display] { return cached }
+        guard let write = Self.io?.write else { reachable[display] = false; return false }
+        var probe = buildPacket([brightnessVCP])   // Get-VCP request for 0x10 — no state change
+        let ok = write(service, chipAddress, dataAddress, &probe, UInt32(probe.count)) == 0
+        reachable[display] = ok
+        HUDDebug.log("ddc probe display=\(display) reachable=\(ok)")
+        return ok
     }
 
     /// One-line diagnostic of the current DDC mapping (for the debug log).
@@ -110,7 +134,7 @@ final class DDCBrightnessController {
     /// the range, matching the system's granularity) and return the new 0…1
     /// level for the HUD. `nil` if the display can't be controlled.
     func adjust(_ display: CGDirectDisplayID, bySteps steps: Int) -> Double? {
-        guard let service = service(for: display) else { return nil }
+        guard let service = service(for: display), reachableViaDDC(display, service: service) else { return nil }
         seedIfNeeded(display, service: service)
 
         let mx = maxValue[display] ?? 100
@@ -131,7 +155,7 @@ final class DDCBrightnessController {
     /// the new 0…1 level for the HUD. `nil` if the display can't be driven over
     /// DDC. Mirrors `adjust`, on its own VCP + cache.
     func adjustAudio(_ display: CGDirectDisplayID, bySteps steps: Int) -> Double? {
-        guard let service = service(for: display) else { return nil }
+        guard let service = service(for: display), reachableViaDDC(display, service: service) else { return nil }
         seedAudioIfNeeded(display, service: service)
 
         let mx = audioMax[display] ?? 100
@@ -174,6 +198,7 @@ final class DDCBrightnessController {
 
     func invalidate() {
         services.removeAll()
+        reachable.removeAll()   // re-probe after a reconnect (DDC/CI may have been toggled)
         didMap = false
         // Keep the brightness cache — the same panels usually come back.
     }
