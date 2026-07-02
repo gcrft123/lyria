@@ -355,7 +355,23 @@ final class SystemHUDProvider: IslandContentProvider {
     /// Whether we can drive this specific display's brightness.
     private func canControl(_ display: CGDirectDisplayID) -> Bool {
         if CGDisplayIsBuiltin(display) != 0 { return Self.displayServices != nil }
-        return ddc.canControl(display)
+        return canControlExternal(display)
+    }
+
+    /// An external display we can drive: DDC/CI if the monitor actually accepts it,
+    /// else DisplayServices for Apple panels (Studio Display / Pro Display XDR), which
+    /// don't speak DDC at all — `DisplayServicesGetBrightness` succeeds only for those.
+    private func canControlExternal(_ display: CGDirectDisplayID) -> Bool {
+        ddc.canControl(display) || Self.brightness(display) != nil
+    }
+
+    /// The external displays currently attached (non-built-in, online).
+    private static func externalDisplays() -> [CGDirectDisplayID] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return ids.filter { CGDisplayIsBuiltin($0) == 0 && CGDisplayIsOnline($0) != 0 }
     }
 
     /// Drive an external monitor's brightness over DDC for an F1/F2 keyDown (the
@@ -380,18 +396,18 @@ final class SystemHUDProvider: IslandContentProvider {
     /// cursor if we can control it, else any controllable external monitor.
     private func externalBrightnessTarget() -> CGDirectDisplayID? {
         let cursor = cursorDisplay()
-        if CGDisplayIsBuiltin(cursor) == 0, ddc.canControl(cursor) { return cursor }
-        return ddc.firstControllableExternal()
+        if CGDisplayIsBuiltin(cursor) == 0, canControlExternal(cursor) { return cursor }
+        return Self.externalDisplays().first { canControlExternal($0) }
     }
 
     /// `steps` brightness steps on the external monitor, presenting the island
-    /// HUD. `steps` > 1 while a held key accelerates.
+    /// HUD. `steps` > 1 while a held key accelerates. Routes through the shared path
+    /// so an Apple external panel (no DDC) is driven via DisplayServices, and the HUD
+    /// only shows when control actually works.
     private func adjustExternalBrightness(up: Bool, steps: Int = 1) {
         guard let display = externalBrightnessTarget() else { return }
-        let direction = up ? 1 : -1
-        guard let level = ddc.adjust(display, bySteps: direction * max(1, steps)) else { return }
-        HUDDebug.log("brightnessKey up=\(up) steps=\(steps) external display=\(display) → level=\(level)")
-        controller?.presentHUD(SystemHUD(kind: .brightness, level: level), direction: direction)
+        adjustBrightness(display, by: (up ? step : -step) * Float(max(1, steps)),
+                         direction: up ? 1 : -1, steps: max(1, steps))
     }
 
     /// The display the cursor is currently over, falling back to the main display.
@@ -457,18 +473,25 @@ final class SystemHUDProvider: IslandContentProvider {
 
     private func adjustBrightness(_ display: CGDirectDisplayID, by delta: Float,
                                   direction: Int, steps: Int = 1) {
-        // External monitor → DDC/CI; built-in panel → DisplayServices.
+        // External monitor that actually speaks DDC → DDC/CI.
         if CGDisplayIsBuiltin(display) == 0,
            let level = ddc.adjust(display, bySteps: direction * max(1, steps)) {
-            HUDDebug.log("brightness external display=\(display) steps=\(steps) → level=\(level)")
+            HUDDebug.log("brightness external(DDC) display=\(display) steps=\(steps) → level=\(level)")
             controller?.presentHUD(SystemHUD(kind: .brightness, level: level),
                                    direction: direction)
             return
         }
-        let current = Self.brightness(display) ?? 0
+        // Built-in, or an Apple external panel → DisplayServices. Only present the HUD
+        // if it truly drives the display: `brightness()` returns nil for a non-Apple
+        // external (where DDC also failed), so we leave that key to the system rather
+        // than showing a change that never lands.
+        guard let current = Self.brightness(display) else {
+            HUDDebug.log("brightness display=\(display): no DDC, not DisplayServices-drivable — left to system")
+            return
+        }
         let next = max(0, min(1, current + delta))
-        Self.setBrightness(next, display: display)
-        HUDDebug.log("brightness built-in display=\(display) \(current) → \(next)")
+        guard Self.setBrightness(next, display: display) else { return }
+        HUDDebug.log("brightness DisplayServices display=\(display) \(current) → \(next)")
         controller?.presentHUD(SystemHUD(kind: .brightness, level: Double(next)),
                                direction: direction)
     }
@@ -711,9 +734,14 @@ final class SystemHUDProvider: IslandContentProvider {
         return ds.get(display, &level) == 0 ? level : nil
     }
 
-    private static func setBrightness(_ value: Float, display: CGDirectDisplayID) {
-        guard let ds = displayServices else { return }
-        _ = ds.set(display, max(0, min(1, value)))
+    /// Set brightness via DisplayServices; returns whether it took (0 == success).
+    /// It drives the built-in panel AND Apple external displays (Studio Display, Pro
+    /// Display XDR); a non-Apple external returns a failure, which the caller uses to
+    /// avoid showing a HUD for a change that won't happen.
+    @discardableResult
+    private static func setBrightness(_ value: Float, display: CGDirectDisplayID) -> Bool {
+        guard let ds = displayServices else { return false }
+        return ds.set(display, max(0, min(1, value))) == 0
     }
 }
 
