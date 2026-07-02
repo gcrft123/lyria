@@ -14,6 +14,7 @@ struct SettingsView: View {
     /// A settings category (add cases here to grow the page).
     enum Category: String, Identifiable, CaseIterable {
         case general
+        case displays
         case music
         case calendar
         case weather
@@ -24,6 +25,7 @@ struct SettingsView: View {
         var title: String {
             switch self {
             case .general: return "General"
+            case .displays: return "Displays"
             case .music: return "Music"
             case .calendar: return "Calendar"
             case .weather: return "Weather"
@@ -35,6 +37,7 @@ struct SettingsView: View {
         var subtitle: String {
             switch self {
             case .general: return "How the island expands"
+            case .displays: return "Which screens show the island"
             case .music: return "Player look, glow & effects"
             case .calendar: return "Event alert timing"
             case .weather: return "Units & condition alerts"
@@ -46,6 +49,7 @@ struct SettingsView: View {
         var icon: String {
             switch self {
             case .general: return "hand.tap"
+            case .displays: return "display.2"
             case .music: return "music.note"
             case .calendar: return "calendar"
             case .weather: return "cloud.sun.fill"
@@ -232,6 +236,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: Spacing.xxl) {
                     switch category {
                     case .general: generalControls
+                    case .displays: displaysControls
                     case .music: musicControls
                     case .calendar: calendarControls
                     case .weather: weatherControls
@@ -269,6 +274,38 @@ struct SettingsView: View {
         .padding(.horizontal, Spacing.xxl)
         .padding(.top, Spacing.xxl)
         .padding(.bottom, Spacing.lg)
+    }
+
+    // MARK: Displays
+
+    /// Pick which connected screens the island appears on. Stored as opt-outs, so a
+    /// newly-connected display shows the island by default.
+    private var displaysControls: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            rowLabel("Show the island on", systemImage: "display.2")
+            let displays = DisplayCatalog.connected()
+            if displays.isEmpty {
+                Text("No displays detected.")
+                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            } else {
+                VStack(spacing: Spacing.md) {
+                    ForEach(displays) { d in
+                        toggleRow(d.isMain ? "\(d.name) (Main)" : d.name,
+                                  systemImage: d.isMain ? "display" : "display.2",
+                                  isOn: Binding(
+                                    get: { settings.showsIsland(onDisplay: d.id) },
+                                    set: { on in
+                                        if on { settings.islandDisplayOptOut.remove(d.id) }
+                                        else { settings.islandDisplayOptOut.insert(d.id) }
+                                    }))
+                    }
+                }
+            }
+            Text("With several displays enabled, the island follows the screen your cursor is on — so brightness and volume act on that screen and their HUD shows there.")
+                .font(Typography.footnote)
+                .foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: Tweaks (Settings → Tweaks → App Volume / EQ & Spatial)
