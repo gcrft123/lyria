@@ -190,6 +190,89 @@ struct IslandConfiguration {
     /// Set to `0` to sit perfectly flush.
     var topInset: CGFloat = 10
 
+    // MARK: Notch integration geometry
+
+    /// On a notched display the island is the physical notch itself, morphing to
+    /// hold content. These describe how far that single black silhouette grows
+    /// out from the bare notch cut-out. The notch's own width/height come from
+    /// `NotchGeometry` (per display); these are the growth deltas around it.
+
+    /// The fixed HITBOX half-width past each side of the physical notch (used for
+    /// hover reach; the visible shell hugs its content and is measured, not fixed).
+    var notchLobeWidth: CGFloat = 116
+
+    /// Gap between a lobe's content and the physical notch (the notch-facing side).
+    var notchLobeInset: CGFloat = 12
+
+    /// Gap between a lobe's content and the shell's outer (screen-facing) rounded
+    /// edge, so content never hugs the corner. The core "breathing room" fix.
+    var notchLobeOuterInset: CGFloat = 16
+
+    /// Symmetric top AND bottom breathing padding around the lobe content, so the
+    /// island reads as a comfortable pill rather than a cramped band.
+    var notchVPad: CGFloat = 9
+
+    /// The flanking-band height: the primary glyph plus symmetric top/bottom
+    /// padding, floored to the physical notch — so the island is a touch taller
+    /// than a bare notch and its content is vertically centred.
+    func notchBand(_ notch: NotchGeometry) -> CGFloat {
+        max(notch.height, IconSize.xxxl + 2 * notchVPad)
+    }
+
+    /// Corner radius of the morphed notch silhouette's outer (bottom) corners —
+    /// matched to the MacBook notch's soft bottom curve.
+    var notchCornerRadius: CGFloat = 18
+
+    /// Gap between the island and its side mini-notches (more air than the tight
+    /// attached-extension gap so separate activities read as distinct notches).
+    var notchPillGap: CGFloat = 10
+
+    /// Extra height the shape drops below the notch when idle (nothing to show).
+    var notchExtensionIdle: CGFloat = 0
+
+    /// Extra height the shape drops below the notch while a live activity is
+    /// showing — the lip carrying the progress bar (8pt bar + ~2pt gap).
+    var notchExtensionActive: CGFloat = 10
+
+    /// Extra height the shape drops below the notch on hover — deeper than the
+    /// active lip, nudging the island to "emerge".
+    var notchExtensionHover: CGFloat = 16
+
+    /// Equalizer-bars cluster width in the music lobe (matches the compact pill).
+    var notchBarsWidth: CGFloat = 18
+
+    /// Stroke width of the calendar countdown ring (its diameter = the primary glyph).
+    var notchRingStroke: CGFloat = 3
+
+    /// Progress-bar dimensions inside the lip (blurred glow capsule + crisp core).
+    var notchProgressGlowHeight: CGFloat = 3
+    var notchProgressLineHeight: CGFloat = 1.5
+    var notchProgressBlur: CGFloat = 4
+
+    /// Guaranteed gap between the physical notch cut-out and below-notch card
+    /// content (for banner / HUD / popup that lack the expanded `Layout.insetTop`).
+    var notchNeckClearance: CGFloat = 6
+
+    /// One hairline stroke for mini-notch pills, edge extensions, and the
+    /// below-notch card outline.
+    var notchStrokeWidth: CGFloat = 0.8
+    var notchStrokeOpacity: CGFloat = 0.35
+
+    /// Extra width a secondary timer chip adds for its live readout.
+    var notchTimerChipReadout: CGFloat = 54
+    /// Glyph-size ratio for the secondary timer chip and edge extensions.
+    var notchGlyphRatio: CGFloat = 0.32
+    /// Glyph-size ratio for the secondary music-bubble fallback note.
+    var notchBubbleGlyphRatio: CGFloat = 0.4
+    /// The green "more timers" dot on a secondary timer chip.
+    var notchMoreDotSize: CGFloat = 8
+    var notchMoreDotStroke: CGFloat = 1.5
+
+    /// How far to each side of the notch silhouette the hover/activation zone
+    /// reaches, so approaching the notch from the sides summons the island rather
+    /// than only a pointer landing dead-centre. (Hit-testing only — invisible.)
+    var notchApproachWidth: CGFloat = 130
+
     // MARK: Panel canvas
 
     /// The hosting panel is larger than the pill so that expanded states, the

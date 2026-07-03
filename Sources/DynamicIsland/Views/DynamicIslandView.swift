@@ -29,6 +29,13 @@ struct DynamicIslandView: View {
     @State private var nudgeScale: CGFloat = 1
     @State private var nudgeX: CGFloat = 0
 
+    /// Measured width of the notch live-activity content, so the shell and side
+    /// pills size to the content instead of a fixed slab.
+    @State private var notchContentWidth: CGFloat = 0
+    /// Horizontal shift that keeps the physical-notch gap centred when the two
+    /// content lobes differ in width (so the emptier side stays clear).
+    @State private var notchShellOffset: CGFloat = 0
+
     /// Real-time audio analyzer powering the "to the beat" glow. Owned here for
     /// the view's lifetime; only actually taps system audio while the beat pulse
     /// is live (`beatPulseActive`). Falls back to a synthetic tempo internally
@@ -51,6 +58,38 @@ struct DynamicIslandView: View {
     private var sideSpring: Animation { Motion.side }
 
     var body: some View {
+        shellAndContent
+            // Only tap system audio while the beat glow is actually on screen —
+            // bring the analyzer up when it goes live, tear it down otherwise.
+            .onChange(of: beatPulseActive) { active in
+                if active { rhythm.start() } else { rhythm.stop() }
+            }
+            .onAppear {
+                rhythm.setSensitivity(pitch: settings.waveSensitivityPitch, volume: settings.waveSensitivityVolume)
+                if beatPulseActive { rhythm.start() }
+            }
+            .onChange(of: settings.waveSensitivityPitch) { _ in
+                rhythm.setSensitivity(pitch: settings.waveSensitivityPitch, volume: settings.waveSensitivityVolume)
+            }
+            .onChange(of: settings.waveSensitivityVolume) { _ in
+                rhythm.setSensitivity(pitch: settings.waveSensitivityPitch, volume: settings.waveSensitivityVolume)
+            }
+            .onDisappear { rhythm.stop() }
+    }
+
+    /// The island shell + content for this display's render style: the classic
+    /// floating blob, or the notch-integrated silhouette.
+    @ViewBuilder
+    private var shellAndContent: some View {
+        switch controller.renderStyle(for: displayID) {
+        case .floating: floatingShell
+        case .notch(let notch): notchShell(notch)
+        }
+    }
+
+    /// The classic detached blob that floats below the top edge.
+    @ViewBuilder
+    private var floatingShell: some View {
         let shape = IslandShape(cornerRadius: geometry.cornerRadius)
         let accent = mainAccent
         let glowing = mode.isExpanded
@@ -119,7 +158,8 @@ struct DynamicIslandView: View {
             // They slide out sideways from behind its left/right edges and
             // re-flow as it morphs.
             .background(alignment: .top) {
-                sideIslandsLayer(islandWidth: geometry.size.width)
+                sideIslandsLayer(islandWidth: geometry.size.width,
+                                 topInset: controller.configuration.topInset, notch: nil)
                     .animation(sideSpring, value: controller.islandExtensions)
                     .animation(sideSpring, value: controller.secondaryIslands)
                     .animation(sideSpring, value: geometry.size)
@@ -129,24 +169,127 @@ struct DynamicIslandView: View {
             // in time with the music. Behind everything, so the black shell (and
             // the side islands) occlude all but the bands bleeding past the edges.
             .background(alignment: .top) {
-                beatGlowLayer(cornerRadius: geometry.cornerRadius, size: geometry.size)
+                beatGlowLayer(cornerRadius: geometry.cornerRadius, size: geometry.size,
+                              topInset: controller.configuration.topInset)
             }
-            // Only tap system audio while the beat glow is actually on screen —
-            // bring the analyzer up when it goes live, tear it down otherwise.
-            .onChange(of: beatPulseActive) { active in
-                if active { rhythm.start() } else { rhythm.stop() }
+    }
+
+    // MARK: Notch-integrated shell
+
+    /// The notch-integrated island: one black `NotchShape` flush to the screen
+    /// top that fuses with the physical notch and morphs to hold content — content
+    /// lobes flanking the notch for a live activity, or a card dropping below it
+    /// (with a black "neck" clearing the cut-out) when expanded / for a banner.
+    private func notchShell(_ notch: NotchGeometry) -> some View {
+        let g = controller.notchShellGeometry(for: displayID, notch: notch)
+        let dropsBelow = controller.notchDropsBelow(mode)
+        let accent = mainAccent
+        let glowing = mode.isExpanded
+        let intensity = settings.glowIntensity
+        // ONE shape whose frame morphs between the flanking activity and the
+        // below-notch card — the shape keeps its identity so the size actually
+        // animates (an if/else Group swaps identities and only cross-fades).
+        let radius = dropsBelow ? g.cornerRadius : controller.configuration.notchCornerRadius
+        let shape = NotchShape(bottomRadius: radius)
+        // Flanking width hugs the measured content; a below-notch card uses its
+        // fixed width. Height always comes from the geometry.
+        let shellWidth = dropsBelow ? g.size.width : (notchContentWidth > 0 ? notchContentWidth : g.size.width)
+        let shellHeight = g.size.height
+        // The flanking silhouette shifts to keep the notch gap centred; the card
+        // stays centred on the notch.
+        let shellOffset = dropsBelow ? 0 : notchShellOffset
+        // A hovered clickable popup / live activity swells a touch — the notch's
+        // take on the pill popup's hover grow. Anchored to the top so it swells
+        // DOWN and out, never up into the bezel.
+        let popupHoverGrow: CGFloat = {
+            if case .popup = mode, controller.popupHovered { return 1.04 }
+            return 1
+        }()
+
+        return shape.fill(Palette.background)
+            .frame(width: shellWidth, height: shellHeight)
+            .overlay {
+                // Content cross-fades (lobes ↔ card) while the shape morphs.
+                Group {
+                    if dropsBelow {
+                        belowNotchContent(notch: notch).transition(.opacity)
+                    } else {
+                        NotchLiveActivityView(controller: controller, notch: notch, mode: mode)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(contentMorph, value: dropsBelow)
+                .animation(contentMorph, value: mode)
             }
-            .onAppear {
-                rhythm.setSensitivity(pitch: settings.waveSensitivityPitch, volume: settings.waveSensitivityVolume)
-                if beatPulseActive { rhythm.start() }
+            .clipShape(shape)
+            .overlay(shape.stroke(accent.opacity(glowing ? 0.14 * intensity : 0),
+                                  lineWidth: controller.configuration.notchStrokeWidth))
+            // A ringing countdown wraps the whole silhouette in a pulsing red
+            // outline, matching the Dynamic Island pill — fades in and out.
+            .overlay {
+                if mainIslandRinging {
+                    RingingGlowOverlay(shape: shape).transition(.opacity)
+                }
             }
-            .onChange(of: settings.waveSensitivityPitch) { _ in
-                rhythm.setSensitivity(pitch: settings.waveSensitivityPitch, volume: settings.waveSensitivityVolume)
+            .animation(Motion.popup, value: mainIslandRinging)
+            .shellShadow()
+            .shadow(color: accent.opacity(glowing ? 0.15 * intensity : 0), radius: 11, y: 0) // design-lint:allow — accent glow (signature), not elevation
+            // Pin affordance: for a card that drops below the notch, nudge it down
+            // past the black neck so it straddles the card's real top-right corner.
+            .overlay(alignment: .topTrailing) {
+                pinControl.offset(y: dropsBelow ? notch.height : 0)
             }
-            .onChange(of: settings.waveSensitivityVolume) { _ in
-                rhythm.setSensitivity(pitch: settings.waveSensitivityPitch, volume: settings.waveSensitivityVolume)
+            .scaleEffect(nudgeScale)
+            .scaleEffect(popupHoverGrow, anchor: .top)
+            .animation(Motion.hover, value: popupHoverGrow)
+            .offset(x: shellOffset + nudgeX)
+            .onChange(of: controller.hudNudge) { nudge in
+                applyNudge(direction: nudge.direction)
             }
-            .onDisappear { rhythm.stop() }
+            // Flush to the very top edge (fuse with the physical notch) — no
+            // `topInset` float, unlike the blob.
+            .frame(width: controller.configuration.canvasWidth,
+                   height: controller.configuration.canvasHeight,
+                   alignment: .top)
+            // The size + centring morph: watch the width, height, corner, and the
+            // structural flip so expand/collapse and content-hug all animate.
+            .animation(morph, value: shellWidth)
+            .animation(morph, value: shellHeight)
+            .animation(morph, value: radius)
+            .animation(morph, value: shellOffset)
+            .onPreferenceChange(NotchShellMetricsKey.self) { metrics in
+                notchContentWidth = metrics.width
+                notchShellOffset = metrics.offset
+            }
+            .background(alignment: .top) {
+                sideIslandsLayer(islandWidth: shellWidth, topInset: 0, notch: notch)
+                    // Follow the shell's centring shift so pills ride off its ACTUAL
+                    // edges (the shell offsets to keep the notch gap centred).
+                    .offset(x: shellOffset)
+                    .animation(sideSpring, value: controller.islandExtensions)
+                    .animation(sideSpring, value: controller.secondaryIslands)
+                    .animation(sideSpring, value: shellWidth)
+                    .animation(sideSpring, value: shellOffset)
+                    .animation(sideSpring, value: controller.extensionBarHeight)
+            }
+            .background(alignment: .top) {
+                // Shed the beat waves ONLY sideways from the notch (no downward
+                // pulse), boosted to match the pill's punch, tracking the shell's
+                // centring shift.
+                beatGlowLayer(cornerRadius: controller.configuration.notchCornerRadius,
+                              size: CGSize(width: shellWidth, height: shellHeight),
+                              topInset: 0, sideOnly: true, boost: 2.6)
+                    .offset(x: dropsBelow ? 0 : notchShellOffset)
+            }
+    }
+
+    /// The below-notch card content: a black "neck" over the physical notch, then
+    /// the standard app / settings / HUD / banner content clear of the cut-out.
+    private func belowNotchContent(notch: NotchGeometry) -> some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: notch.height)
+            content
+        }
     }
 
     /// How far the pin button straddles past the card's top-right corner. Kept
@@ -190,16 +333,18 @@ struct DynamicIslandView: View {
     /// The beat ripple, positioned to align with the live island (top-centred,
     /// `topInset` down, sized to the current geometry). Empty when inactive.
     @ViewBuilder
-    private func beatGlowLayer(cornerRadius: CGFloat, size: CGSize) -> some View {
+    private func beatGlowLayer(cornerRadius: CGFloat, size: CGSize, topInset: CGFloat,
+                              sideOnly: Bool = false, boost: Double = 1) -> some View {
         if beatPulseActive {
             BeatGlowOverlay(cornerRadius: cornerRadius,
                             size: size,
                             accent: mainAccent,
                             // Keep it visible even at a low glow setting, but let
                             // the slider still scale it.
-                            intensity: 0.5 + 0.5 * settings.glowIntensity,
-                            monitor: rhythm)
-                .padding(.top, controller.configuration.topInset)
+                            intensity: (0.5 + 0.5 * settings.glowIntensity) * boost,
+                            monitor: rhythm,
+                            sideOnly: sideOnly)
+                .padding(.top, topInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
@@ -410,12 +555,20 @@ struct DynamicIslandView: View {
     }
 
     @ViewBuilder
-    private func sideIslandsLayer(islandWidth: CGFloat) -> some View {
-        let height = controller.extensionBarHeight
-        let laid = laidOutSideItems(islandWidth: islandWidth, height: height)
+    private func sideIslandsLayer(islandWidth: CGFloat, topInset: CGFloat,
+                                  notch: NotchGeometry? = nil) -> some View {
+        // In notch mode each side pill is its own mini-notch: flush to the top,
+        // the SAME band height as the main silhouette so their bottoms line up and
+        // their content aligns, notch-shaped, spaced by the island gap.
+        let isNotch = notch != nil
+        let height = isNotch
+            ? controller.configuration.notchBand(notch!)
+            : controller.extensionBarHeight
+        let laid = laidOutSideItems(islandWidth: islandWidth, height: height,
+                                    topInset: topInset, notchStyle: isNotch)
         ZStack {
             ForEach(laid) { entry in
-                sideItemView(entry.item, height: height)
+                sideItemView(entry.item, height: height, notchStyle: notch != nil)
                     // Emerge from behind the main island: the transition starts it
                     // tucked at centre (x = 0, fully occluded) and slides it out to
                     // the resting x.
@@ -437,12 +590,14 @@ struct DynamicIslandView: View {
     }
 
     @ViewBuilder
-    private func sideItemView(_ item: SideItem, height: CGFloat) -> some View {
+    private func sideItemView(_ item: SideItem, height: CGFloat, notchStyle: Bool) -> some View {
+        let notchRadius: CGFloat? = notchStyle ? controller.configuration.notchCornerRadius : nil
         switch item.content {
         case .secondary(let island):
-            SecondaryAppIslandView(controller: controller, island: island, height: height)
+            SecondaryAppIslandView(controller: controller, island: island,
+                                   height: height, notchBottomRadius: notchRadius)
         case .indicator(let ext):
-            IslandExtensionView(model: ext, height: height)
+            IslandExtensionView(model: ext, height: height, notchBottomRadius: notchRadius)
         }
     }
 
@@ -477,9 +632,13 @@ struct DynamicIslandView: View {
     /// items (camera/mic on the leading edge) march out to the left of
     /// `-islandWidth/2`. Each starts flush with the island's edge, so it slides
     /// cleanly out from behind it.
-    private func laidOutSideItems(islandWidth: CGFloat, height: CGFloat) -> [LaidSideItem] {
-        let gap = controller.configuration.extensionDetachedGap
-        let topInset = controller.configuration.topInset
+    private func laidOutSideItems(islandWidth: CGFloat, height: CGFloat, topInset: CGFloat,
+                                  notchStyle: Bool = false) -> [LaidSideItem] {
+        // Mini-notch pills sit a clear gap off the main silhouette so separate
+        // activities read as distinct notches; floating extensions keep their gap.
+        let gap = notchStyle
+            ? controller.configuration.notchPillGap
+            : controller.configuration.extensionDetachedGap
         var result: [LaidSideItem] = []
 
         // Trailing edge (right): trailing indicators hug the island, then the

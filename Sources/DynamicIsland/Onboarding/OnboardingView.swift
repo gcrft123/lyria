@@ -9,24 +9,32 @@ struct OnboardingView: View {
     @ObservedObject var coordinator: OnboardingCoordinator
     @EnvironmentObject var settings: AppSettings
 
+    /// The physical notch of the display the onboarding is on, when it should hand
+    /// off to a notch-integrated island. When set, the closing beat collapses the
+    /// card flush INTO the notch (square top) rather than into a floating pill.
+    var notch: NotchGeometry? = nil
+
     /// The onboarding brand accent (matches the app icon's indigo).
     private let accent = Palette.indigo
     private var phase: OnboardingPhase { coordinator.phase }
     private var reduceMotion: Bool { coordinator.reduceMotion }
 
     private var morphing: Bool { coordinator.morphingOut }
+    /// The closing beat, handing off to a notch island → collapse into the notch.
+    private var notchMorph: Bool { morphing && notch != nil }
 
     var body: some View {
         GeometryReader { geo in
-            // While morphing out, the card flies up to the notch and shrinks to a
-            // pill, so it lands exactly where the real island appears.
-            let topPad = morphing ? Spacing.lg : geo.size.height * 0.16
+            // While morphing out, the card flies up and shrinks to where the real
+            // island appears: flush into the notch (notch handoff), else a pill a
+            // little below the top edge (floating island).
+            let topPad = notchMorph ? 0 : (morphing ? Spacing.lg : geo.size.height * 0.16)
             ZStack {
                 AuroraBackdrop(accent: accent, reduceMotion: reduceMotion)
                     .opacity(morphing ? 0 : 1)
                 VStack(spacing: Spacing.xxxl) {
                     LivingIsland(size: cardSize, cornerRadius: cardRadius, accent: accent,
-                                 glow: glow, reduceMotion: reduceMotion) {
+                                 glow: glow, flushTop: notchMorph, reduceMotion: reduceMotion) {
                         cardContent.opacity(morphing ? 0 : 1)
                     }
                     if phase != .awakening && !morphing {
@@ -42,11 +50,16 @@ struct OnboardingView: View {
         .onAppear { coordinator.start() }
     }
 
-    /// The card's size/corner — collapses to a notch pill while morphing out.
+    /// The card's size/corner — collapses into the notch (or a floating pill) while
+    /// morphing out.
     private var cardSize: CGSize {
-        morphing ? CGSize(width: Layout.onboardingSeedWidth, height: Layout.onboardingSeedHeight) : size
+        if notchMorph { return CGSize(width: notch!.width, height: notch!.height) }
+        return morphing ? CGSize(width: Layout.onboardingSeedWidth, height: Layout.onboardingSeedHeight) : size
     }
-    private var cardRadius: CGFloat { morphing ? Layout.onboardingSeedHeight / 2 : cornerRadius }
+    private var cardRadius: CGFloat {
+        if notchMorph { return IslandConfiguration.default.notchCornerRadius }
+        return morphing ? Layout.onboardingSeedHeight / 2 : cornerRadius
+    }
 
     // MARK: Card sizing (morphs between acts)
 
@@ -205,12 +218,21 @@ struct LivingIsland<Content: View>: View {
     let cornerRadius: CGFloat
     let accent: Color
     let glow: Double
+    /// When true the silhouette is flush-top (a `NotchShape`), for collapsing into
+    /// the physical notch; otherwise the classic all-round island card.
+    var flushTop: Bool = false
     let reduceMotion: Bool
     @ViewBuilder var content: Content
 
+    /// The card silhouette — a notch shape while handing off to the notch, else the
+    /// all-round island card.
+    private var shape: AnyShape {
+        flushTop ? AnyShape(NotchShape(bottomRadius: cornerRadius))
+                 : AnyShape(IslandShape(cornerRadius: cornerRadius))
+    }
+
     var body: some View {
-        let shape = IslandShape(cornerRadius: cornerRadius)
-        return shape.fill(Palette.background)
+        shape.fill(Palette.background)
             .frame(width: size.width, height: size.height)
             .overlay { content.clipShape(shape) }
             .overlay(shape.stroke(accent.opacity(0.18), lineWidth: 0.8))
@@ -220,7 +242,7 @@ struct LivingIsland<Content: View>: View {
     }
 
     @ViewBuilder
-    private func breathingHalo(shape: IslandShape) -> some View {
+    private func breathingHalo(shape: AnyShape) -> some View {
         if reduceMotion {
             shape.fill(Palette.background)
                 .frame(width: size.width, height: size.height)

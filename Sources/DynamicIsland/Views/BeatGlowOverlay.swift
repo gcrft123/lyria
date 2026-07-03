@@ -34,6 +34,12 @@ struct BeatGlowOverlay: View {
     /// The live rhythm engine. When it isn't delivering audio we fall back to the
     /// synthetic tempo below.
     var monitor: AudioRhythmMonitor
+    /// Where each ripple grows from (horizontal origin). `.center` sheds evenly
+    /// left and right.
+    var anchor: UnitPoint = .center
+    /// When true, ripples grow PURELY sideways (no vertical spread) — for the notch
+    /// island, whose waves must shed only from the left/right edges, never down.
+    var sideOnly: Bool = false
 
     // MARK: Synthetic fallback
 
@@ -101,11 +107,11 @@ struct BeatGlowOverlay: View {
         let l = max(0, min(1, level))
         if l > 0.02 {
             let scaleX = 1 + travel * 0.5 * CGFloat(l)
-            let scaleY = 1 + travel * 0.08 * CGFloat(l)
+            let scaleY = sideOnly ? 1 : 1 + travel * 0.08 * CGFloat(l)
             IslandShape(cornerRadius: cornerRadius)
                 .fill(accent)
                 .frame(width: size.width, height: size.height)
-                .scaleEffect(x: scaleX, y: scaleY, anchor: .center)
+                .scaleEffect(x: scaleX, y: scaleY, anchor: anchor)
                 .blur(radius: 14)
                 .opacity(intensity * 0.5 * l)
         }
@@ -139,14 +145,14 @@ struct BeatGlowOverlay: View {
         // waves, not an all-round bloom), soften with distance, fade as it
         // travels.
         let scaleX = 1 + travel * CGFloat(p)
-        let scaleY = 1 + travel * 0.16 * CGFloat(p)
+        let scaleY = sideOnly ? 1 : 1 + travel * 0.16 * CGFloat(p)
         let fade = pow(1 - p, 1.6)                 // bright at the edge, gone far out
         let opacity = intensity * 0.65 * fade * strength
 
         return IslandShape(cornerRadius: cornerRadius)
             .fill(accent)
             .frame(width: size.width, height: size.height)
-            .scaleEffect(x: scaleX, y: scaleY, anchor: .center)
+            .scaleEffect(x: scaleX, y: scaleY, anchor: anchor)
             .blur(radius: 7 + 18 * p)
             .opacity(opacity)
     }

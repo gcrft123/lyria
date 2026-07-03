@@ -278,39 +278,83 @@ struct SettingsView: View {
 
     // MARK: Displays
 
-    /// Pick which connected screens the island appears on. Stored as opt-outs, so a
-    /// newly-connected display shows the island by default.
+    /// A display the app has seen before but which isn't currently connected —
+    /// still listed so its island / notch choice can be pre-set and persists.
+    private struct DisconnectedDisplay: Identifiable { let id: String; let name: String }
+
+    /// Pick which screens the island appears on, and whether a notched screen uses
+    /// notch integration. Stored as opt-outs, so a newly-connected display shows the
+    /// island (and integrates its notch) by default. Displays seen before but now
+    /// disconnected stay listed so their choices persist.
     private var displaysControls: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            rowLabel("Show the island on", systemImage: "display.2")
-            let displays = DisplayCatalog.connected()
-            let enabledCount = displays.filter { settings.showsIsland(onDisplay: $0.id) }.count
-            if displays.isEmpty {
+            rowLabel("Displays", systemImage: "display.2")
+            let connected = DisplayCatalog.connected()
+            let connectedIDs = Set(connected.map { $0.id })
+            let enabledCount = connected.filter { settings.showsIsland(onDisplay: $0.id) }.count
+            let remembered = settings.knownDisplays
+                .filter { !connectedIDs.contains($0.key) }
+                .map { DisconnectedDisplay(id: $0.key, name: $0.value) }
+                .sorted { $0.name < $1.name }
+            if connected.isEmpty && remembered.isEmpty {
                 Text("No displays detected.")
                     .font(Typography.callout).foregroundStyle(Palette.textSecondary)
             } else {
-                VStack(spacing: Spacing.md) {
-                    ForEach(displays) { d in
-                        // The last enabled display can't be turned off — the island
-                        // always appears on at least one screen.
-                        let isOnly = settings.showsIsland(onDisplay: d.id) && enabledCount <= 1
-                        toggleRow(d.isMain ? "\(d.name) (Main)" : d.name,
-                                  systemImage: d.isMain ? "display" : "display.2",
-                                  isOn: Binding(
-                                    get: { settings.showsIsland(onDisplay: d.id) },
-                                    set: { on in
-                                        if on { settings.islandDisplayOptOut.remove(d.id) }
-                                        else if enabledCount > 1 { settings.islandDisplayOptOut.insert(d.id) }
-                                    }))
-                        .disabled(isOnly)
+                VStack(spacing: Spacing.lg) {
+                    ForEach(connected) { d in
+                        displayRow(id: d.id,
+                                   name: d.isMain ? "\(d.name) (Main)" : d.name,
+                                   systemImage: d.isMain ? "display" : "display.2",
+                                   notchCapable: d.hasNotch || settings.notchCapable.contains(d.id),
+                                   enabledCount: enabledCount,
+                                   connected: true)
+                    }
+                    ForEach(remembered) { d in
+                        displayRow(id: d.id,
+                                   name: "\(d.name) (disconnected)",
+                                   systemImage: "display.2",
+                                   notchCapable: settings.notchCapable.contains(d.id),
+                                   enabledCount: enabledCount,
+                                   connected: false)
                     }
                 }
             }
-            Text("The island appears on every enabled display. The screen your cursor is on is the one that expands and shows brightness/volume changes. At least one display always stays on.")
+            Text("The island appears on every enabled display; the screen your cursor is on is the one that expands and shows brightness/volume changes. On a Mac with a notch, the island integrates into the notch — turn that off to keep the floating island there instead. At least one display always stays on, and these choices persist even while a display is unplugged.")
                 .font(Typography.footnote)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// One display's controls: the island on/off toggle, plus a notch-integration
+    /// sub-toggle when the display has (or had) a hardware notch.
+    @ViewBuilder
+    private func displayRow(id: String, name: String, systemImage: String,
+                            notchCapable: Bool, enabledCount: Int, connected: Bool) -> some View {
+        // The last enabled connected display can't be turned off — the island always
+        // shows on at least one live screen.
+        let isOnly = connected && settings.showsIsland(onDisplay: id) && enabledCount <= 1
+        VStack(spacing: Spacing.sm) {
+            toggleRow(name, systemImage: systemImage,
+                      isOn: Binding(
+                        get: { settings.showsIsland(onDisplay: id) },
+                        set: { on in
+                            if on { settings.islandDisplayOptOut.remove(id) }
+                            else if !isOnly { settings.islandDisplayOptOut.insert(id) }
+                        }))
+                .disabled(isOnly)
+            if notchCapable {
+                toggleRow("Notch integration", systemImage: "rectangle.topthird.inset.filled",
+                          isOn: Binding(
+                            get: { !settings.notchModeOptOut.contains(id) },
+                            set: { on in
+                                if on { settings.notchModeOptOut.remove(id) }
+                                else { settings.notchModeOptOut.insert(id) }
+                            }))
+                    .padding(.leading, Spacing.xl)
+            }
+        }
+        .opacity(connected ? 1 : 0.6)
     }
 
     // MARK: Tweaks (Settings → Tweaks → App Volume / EQ & Spatial)

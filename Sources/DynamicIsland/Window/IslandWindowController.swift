@@ -129,6 +129,9 @@ final class IslandWindowController: NSObject {
 
     /// Create / remove / reposition panels so there's exactly one per enabled display.
     private func reconcile() {
+        // Remember the connected displays (name + notch capability) so the Displays
+        // settings page can still list — and keep toggles for — a disconnected one.
+        controller.settings.rememberDisplays(DisplayCatalog.connected())
         let wanted = Dictionary(uniqueKeysWithValues: enabledScreens().compactMap { screen in
             DisplayCatalog.displayID(of: screen).map { ($0, screen) }
         })
@@ -283,6 +286,7 @@ final class IslandWindowController: NSObject {
         // grows it. For the immunity tail after it clears we keep collapsed.
         if controller.activePopup != nil {
             exitWorkItem?.cancel(); exitWorkItem = nil
+            controller.setNotchHovered(nil)
             if let active {
                 active.panel.ignoresMouseEvents = false
                 controller.setPopupHovered(
@@ -295,12 +299,14 @@ final class IslandWindowController: NSObject {
         }
         if controller.blocksHoverActivation {
             active?.panel.ignoresMouseEvents = true
+            controller.setNotchHovered(nil)
             if controller.isHovered { controller.setHovered(nil) }
             return
         }
 
         guard let active else {
             // Cursor isn't over any island's screen → outside every island.
+            controller.setNotchHovered(nil)
             handleOutside()
             return
         }
@@ -322,18 +328,22 @@ final class IslandWindowController: NSObject {
                 || controller.mode(for: active.id).isExpanded
 
             if shouldExpand {
+                controller.setNotchHovered(nil)
                 controller.interactionHandler?.pointerDidEnter(display: active.id)
                 controller.setPinCornerHovered(controller.mode(for: active.id).isExpanded
                     && pinCornerRect(for: active.panel, displayID: active.id).contains(location))
             } else {
-                // Over the compact pill, waiting for the click/scroll gesture: capture
-                // events (to detect it) but stay collapsed.
+                // Over the compact pill / notch, waiting for the click/scroll gesture:
+                // capture events (to detect it) but stay collapsed. On a notch display,
+                // nudge the silhouette to grow — "urging" the island to emerge.
+                controller.setNotchHovered(isNotchDisplay(active.id) ? active.id : nil)
                 if controller.hoveredDisplay == active.id { controller.setHovered(nil) }
                 controller.setPinCornerHovered(false)
             }
         } else {
             active.panel.ignoresMouseEvents = true
             controller.setPinCornerHovered(false)
+            controller.setNotchHovered(nil)
             handleOutside()
         }
     }
@@ -351,11 +361,21 @@ final class IslandWindowController: NSObject {
 
     /// Zone over the active card's top-right corner, where the pin affordance sits.
     private func pinCornerRect(for panel: IslandPanel, displayID: CGDirectDisplayID) -> NSRect {
-        let size = controller.geometry(for: displayID).size
-        let rightX = panel.frame.midX + size.width / 2
-        let topY = panel.frame.maxY - configuration.topInset
         let reach: CGFloat = 52   // inward from the corner
         let out: CGFloat = 14     // a touch past the corner (the button overhangs)
+        let rightX: CGFloat
+        let topY: CGFloat
+        switch controller.renderStyle(for: displayID) {
+        case .floating:
+            let size = controller.geometry(for: displayID).size
+            rightX = panel.frame.midX + size.width / 2
+            topY = panel.frame.maxY - configuration.topInset
+        case .notch(let notch):
+            let size = controller.notchShellGeometry(for: displayID, notch: notch).size
+            rightX = panel.frame.midX + size.width / 2
+            // The card content begins below the black neck; the pin straddles that.
+            topY = panel.frame.maxY - notch.height
+        }
         return NSRect(x: rightX - reach, y: topY - reach, width: reach + out, height: reach + out)
     }
 
@@ -383,19 +403,38 @@ final class IslandWindowController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + exitGrace, execute: work)
     }
 
-    /// A panel's island hitbox in screen coordinates. The visible blob floats
-    /// `topInset` below the screen top (shadow room), but the hitbox stretches to the
-    /// very top edge so slamming the pointer up triggers the island.
+    /// A panel's island hitbox in screen coordinates. The floating blob hangs
+    /// `topInset` below the screen top (shadow room) but its hitbox stretches to the
+    /// very top edge so slamming the pointer up triggers it. A notch island is
+    /// flush to the top edge, so its hitbox is the morphed silhouette itself —
+    /// which when idle is just the physical notch.
     private func islandRect(for panel: IslandPanel, displayID: CGDirectDisplayID, inflatedBy padding: CGFloat = 0) -> NSRect {
-        let size = controller.geometry(for: displayID).size
         let frame = panel.frame
-        let bottomY = frame.maxY - configuration.topInset - size.height
-        let topY = frame.maxY  // screen top edge — no gap above the blob
+        let size: CGSize
+        let bottomY: CGFloat
+        var hPad = padding
+        switch controller.renderStyle(for: displayID) {
+        case .floating:
+            size = controller.geometry(for: displayID).size
+            bottomY = frame.maxY - configuration.topInset - size.height
+        case .notch(let notch):
+            size = controller.notchShellGeometry(for: displayID, notch: notch).size
+            bottomY = frame.maxY - size.height  // flush to the top edge
+            // Reach out to the sides so approaching the notch from either side
+            // summons the island, not only a pointer landing dead-centre.
+            hPad += configuration.notchApproachWidth
+        }
         let rect = NSRect(x: frame.midX - size.width / 2,
                           y: bottomY,
                           width: size.width,
-                          height: topY - bottomY)
-        return rect.insetBy(dx: -padding, dy: -padding)
+                          height: frame.maxY - bottomY)
+        return rect.insetBy(dx: -hPad, dy: -padding)
+    }
+
+    /// Whether the given display currently renders in notch-integrated mode.
+    private func isNotchDisplay(_ displayID: CGDirectDisplayID) -> Bool {
+        if case .notch = controller.renderStyle(for: displayID) { return true }
+        return false
     }
 
     // MARK: Scroll to switch apps

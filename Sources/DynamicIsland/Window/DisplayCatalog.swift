@@ -8,6 +8,10 @@ struct DisplayInfo: Identifiable {
     let displayID: CGDirectDisplayID
     let name: String
     let isMain: Bool
+    /// Whether this display has a hardware notch (drives notch integration).
+    let hasNotch: Bool
+    /// The measured notch, present iff `hasNotch`.
+    let notch: NotchGeometry?
 }
 
 /// Enumerates the connected displays and resolves their stable identifiers. Shared
@@ -19,13 +23,20 @@ enum DisplayCatalog {
         let mainID = CGMainDisplayID()
         return NSScreen.screens.compactMap { screen -> DisplayInfo? in
             guard let num = displayID(of: screen), let uuid = persistentID(for: num) else { return nil }
-            return DisplayInfo(id: uuid, displayID: num, name: name(of: screen, id: num), isMain: num == mainID)
+            let notch = NotchDetector.geometry(for: screen)
+            return DisplayInfo(id: uuid, displayID: num, name: name(of: screen, id: num),
+                               isMain: num == mainID, hasNotch: notch != nil, notch: notch)
         }
         .sorted { ($0.isMain ? 0 : 1, $0.name) < ($1.isMain ? 0 : 1, $1.name) }
     }
 
     static func displayID(of screen: NSScreen) -> CGDirectDisplayID? {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+
+    /// The hardware notch of a connected display, or `nil` if none / not connected.
+    static func notchGeometry(for displayID: CGDirectDisplayID) -> NotchGeometry? {
+        NotchDetector.geometry(for: displayID)
     }
 
     /// Stable UUID string for a display id (survives resolution / reconnect).

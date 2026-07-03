@@ -394,6 +394,82 @@ final class DynamicIslandController: ObservableObject {
     /// Geometry for the focused display's mode.
     var geometry: IslandGeometry { geometry(for: mode) }
 
+    // MARK: Notch integration
+
+    /// The display (if any) whose bare/compact notch the pointer is currently over
+    /// but which hasn't expanded yet — drives the "urge to emerge" grow while the
+    /// user hovers the notch under a click/scroll expand trigger.
+    @Published private(set) var notchHovered: CGDirectDisplayID?
+
+    func setNotchHovered(_ display: CGDirectDisplayID?) {
+        if notchHovered != display { notchHovered = display }
+    }
+
+    /// How a display draws the island: the classic floating blob, or integrated
+    /// with its hardware notch. Notch integration is on by default for a notched
+    /// display, unless the user opted it out.
+    func renderStyle(for displayID: CGDirectDisplayID) -> IslandRenderStyle {
+        guard let notch = DisplayCatalog.notchGeometry(for: displayID),
+              let pid = DisplayCatalog.persistentID(for: displayID),
+              settings.usesNotchMode(onDisplay: pid, hasNotch: true) else { return .floating }
+        return .notch(notch)
+    }
+
+    /// In notch mode, whether this mode's content drops BELOW the notch as a
+    /// full-width card (a black "neck" at the top, content clear of the notch:
+    /// expanded / settings / HUD / banner notification) versus FLANKS the notch in
+    /// two content lobes at menu-bar height (compact / live activity / status popup).
+    func notchDropsBelow(_ mode: IslandMode) -> Bool {
+        switch mode {
+        case .expanded, .settings, .hud: return true
+        case .popup(let p): return p.style == .banner
+        default: return false
+        }
+    }
+
+    /// Geometry of the morphed notch silhouette on `displayID`: the black shape's
+    /// size and its (bottom) corner radius for the current mode. The shape's top is
+    /// always flush with the screen edge (it fuses with the physical notch); these
+    /// sizes describe how far it grows out around and below the cut-out.
+    func notchShellGeometry(for displayID: CGDirectDisplayID, notch: NotchGeometry) -> IslandGeometry {
+        let c = configuration
+        let m = mode(for: displayID)
+        let urging = notchHovered == displayID
+        switch m {
+        case .idle:
+            // The bare notch — invisible black-on-black — nudged a touch on hover.
+            let ext = urging ? c.notchExtensionHover : c.notchExtensionIdle
+            return IslandGeometry(size: CGSize(width: notch.width, height: notch.height + ext),
+                                  cornerRadius: c.notchCornerRadius)
+        case .compact, .liveActivity:
+            let ext = urging ? c.notchExtensionHover : 0
+            return IslandGeometry(size: CGSize(width: notch.width + 2 * c.notchLobeWidth,
+                                               height: c.notchBand(notch) + ext),
+                                  cornerRadius: c.notchCornerRadius)
+        case .popup(let popup):
+            if popup.style == .liveActivity {
+                let ext = urging ? c.notchExtensionHover : 0
+                return IslandGeometry(size: CGSize(width: notch.width + 2 * c.notchLobeWidth,
+                                                   height: c.notchBand(notch) + ext),
+                                      cornerRadius: c.notchCornerRadius)
+            }
+            // A banner notification drops below the notch as a card.
+            return IslandGeometry(size: CGSize(width: c.popupWidth, height: notch.height + c.popupHeight),
+                                  cornerRadius: c.expandedCornerRadius)
+        case .expanded(let app):
+            let base = expandedSize(app)
+            return IslandGeometry(size: CGSize(width: base.width, height: notch.height + base.height),
+                                  cornerRadius: c.expandedCornerRadius)
+        case .settings:
+            let h = appVolumeStore.eqPageActive ? c.tweaksEQHeight : c.settingsHeight
+            return IslandGeometry(size: CGSize(width: c.expandedTotalWidth, height: notch.height + h),
+                                  cornerRadius: c.expandedCornerRadius)
+        case .hud:
+            return IslandGeometry(size: CGSize(width: c.hudWidth, height: notch.height + c.hudHeight),
+                                  cornerRadius: c.notchCornerRadius)
+        }
+    }
+
     /// Geometry for a specific mode.
     private func geometry(for mode: IslandMode) -> IslandGeometry {
         let c = configuration

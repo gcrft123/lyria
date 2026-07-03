@@ -71,6 +71,24 @@ struct WeatherCondition: Equatable {
         }
     }
 
+    /// A single tight word for the notch lobe, where space is scarce — collapses
+    /// alerts and multi-word conditions ("Severe Thunderstorm Warning" →
+    /// "Thunderstorm", "Heavy Rain" → "Rain").
+    var short: String {
+        switch kind {
+        case .clear:        return isDay ? "Sunny" : "Clear"
+        case .partlyCloudy: return "Cloudy"
+        case .cloudy:       return "Cloudy"
+        case .fog:          return "Fog"
+        case .drizzle:      return "Drizzle"
+        case .rain:         return "Rain"
+        case .heavyRain:    return "Rain"
+        case .snow:         return "Snow"
+        case .sleet:        return "Sleet"
+        case .thunderstorm: return "Thunderstorm"
+        }
+    }
+
     /// A multicolor SF Symbol, day/night aware (used in the compact pill, hero,
     /// hourly, and daily rows).
     var symbol: String {

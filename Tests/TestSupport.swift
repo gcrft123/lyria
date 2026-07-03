@@ -37,6 +37,7 @@ struct DynamicIslandTests {
         runCoreLogicTests()
         runCalculatorEngineTests()
         runMusicLibraryTests()
+        runNotchTests()
 
         let line = "Tests: \(TestState.passed) passed, \(TestState.failed) failed\n"
         FileHandle.standardError.write(Data(line.utf8))

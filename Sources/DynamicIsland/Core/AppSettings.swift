@@ -155,6 +155,46 @@ final class AppSettings: ObservableObject {
         !islandDisplayOptOut.contains(persistentID)
     }
 
+    /// Persistent UUIDs of NOTCHED displays the user has turned notch integration
+    /// OFF for. Opt-outs (like `islandDisplayOptOut`), so a notched display uses
+    /// notch integration by default; empty = every notched display integrates.
+    @Published var notchModeOptOut: Set<String> {
+        didSet { defaults.set(Array(notchModeOptOut), forKey: Key.notchModeOptOut) }
+    }
+
+    /// Every display we've ever seen: persistent id → last-known name. Lets the
+    /// Displays settings page keep listing (and keep toggles for) a display that
+    /// is currently disconnected.
+    @Published private(set) var knownDisplays: [String: String] {
+        didSet { defaults.set(knownDisplays, forKey: Key.knownDisplays) }
+    }
+
+    /// Persistent ids of displays we've seen that have a hardware notch, so the
+    /// notch toggle stays available for a remembered-but-disconnected notched
+    /// display.
+    @Published private(set) var notchCapable: Set<String> {
+        didSet { defaults.set(Array(notchCapable), forKey: Key.notchCapable) }
+    }
+
+    /// Whether the display with this id should use notch integration — it must
+    /// actually have (or have had) a notch and not be opted out.
+    func usesNotchMode(onDisplay persistentID: String, hasNotch: Bool) -> Bool {
+        hasNotch && !notchModeOptOut.contains(persistentID)
+    }
+
+    /// Record the currently-connected displays so disconnected ones stay listed
+    /// in Settings and their notch capability is remembered.
+    func rememberDisplays(_ infos: [DisplayInfo]) {
+        var names = knownDisplays
+        var notched = notchCapable
+        for info in infos {
+            names[info.id] = info.name
+            if info.hasNotch { notched.insert(info.id) }
+        }
+        if names != knownDisplays { knownDisplays = names }
+        if notched != notchCapable { notchCapable = notched }
+    }
+
     /// Allowed lead-time choices (minutes) for the calendar live activity.
     static let calendarLeadChoices = [5, 10, 15, 30]
 
@@ -179,6 +219,9 @@ final class AppSettings: ObservableObject {
         static let waveSensitivityPitch = "music.waveSensitivityPitch"
         static let waveSensitivityVolume = "music.waveSensitivityVolume"
         static let islandDisplayOptOut = "displays.islandOptOut"
+        static let notchModeOptOut = "displays.notchModeOptOut"
+        static let knownDisplays = "displays.known"
+        static let notchCapable = "displays.notchCapable"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -219,6 +262,9 @@ final class AppSettings: ObservableObject {
         waveSensitivityVolume = Self.sanitizedCurve(
             defaults.array(forKey: Key.waveSensitivityVolume) as? [Double], fallback: Self.defaultVolumeCurve)
         islandDisplayOptOut = Set((defaults.array(forKey: Key.islandDisplayOptOut) as? [String]) ?? [])
+        notchModeOptOut = Set((defaults.array(forKey: Key.notchModeOptOut) as? [String]) ?? [])
+        knownDisplays = (defaults.dictionary(forKey: Key.knownDisplays) as? [String: String]) ?? [:]
+        notchCapable = Set((defaults.array(forKey: Key.notchCapable) as? [String]) ?? [])
     }
 
     // MARK: Derived

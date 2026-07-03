@@ -104,6 +104,17 @@ final class AudioRhythmMonitor {
 
     /// DI_DEBUG_AUDIO=1 logs the tap pipeline's bring-up to stderr.
     private let debug = ProcessInfo.processInfo.environment["DI_DEBUG_AUDIO"] == "1"
+    /// DI_MOCK_BEAT=1 forces the synthetic 120-BPM fallback (report "not live"),
+    /// so the beat glow can be exercised without real audio (screenshots/tests).
+    private let mockBeat = ProcessInfo.processInfo.environment["DI_MOCK_BEAT"] == "1"
+
+    /// Last time the live tap actually delivered a signal (loudness or a beat).
+    /// Read/written only on the main thread (in `snapshot()`).
+    private var lastSignalTime: CFTimeInterval = 0
+    /// If a "live" tap delivers nothing for this long, we treat it as broken and
+    /// report not-live so the overlay uses the synthetic clock — a safety net for
+    /// OS builds where the process tap connects but never captures the audio.
+    private let silentFallbackDelay: CFTimeInterval = 1.5
     private func log(_ message: @autoclosure () -> String) {
         if debug { FileHandle.standardError.write(Data(("[rhythm] " + message() + "\n").utf8)) }
     }
@@ -268,6 +279,15 @@ final class AudioRhythmMonitor {
 
     func snapshot() -> RhythmSnapshot {
         let now = CACurrentMediaTime()
+        // Synthetic LIVE signal for screenshots/tests: exercises the real
+        // rendering path (continuous loudness halo + beat ripples), not just the
+        // no-audio fallback, so the glow can be verified without real audio.
+        if mockBeat {
+            let level = 0.55 + 0.35 * sin(now * 2 * Double.pi * 1.5)   // ~0.2 … 0.9 breathing
+            let phase = now.truncatingRemainder(dividingBy: 0.5)       // a beat twice a second
+            return RhythmSnapshot(isLive: true, level: max(0, level),
+                                  beats: [BeatEvent(time: now - phase, strength: 1)])
+        }
         os_unfair_lock_lock(lock)
         let live = running
         let level = sharedLevel
@@ -279,7 +299,13 @@ final class AudioRhythmMonitor {
         os_unfair_lock_unlock(lock)
 
         beats.sort { $0.time < $1.time }
-        return RhythmSnapshot(isLive: live, level: live ? level : 0, beats: beats)
+        // Safety net: a "live" tap that delivers no signal for a while (a silent /
+        // broken capture — seen where the process tap connects but never receives
+        // the audio) falls back to the synthetic clock, so the glow keeps pulsing
+        // during playback instead of staying dark.
+        if live && (level > 0.02 || !beats.isEmpty) { lastSignalTime = now }
+        let capturing = live && (now - lastSignalTime < silentFallbackDelay)
+        return RhythmSnapshot(isLive: capturing, level: capturing ? level : 0, beats: beats)
     }
 
     // MARK: Audio thread

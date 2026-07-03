@@ -9,6 +9,15 @@ struct IslandExtensionView: View {
     var model: IslandExtension
     /// The island's current bar height — the extension matches it exactly.
     var height: CGFloat
+    /// When set, the blob is its own mini-notch: flush to the top with a square
+    /// top and this bottom-corner radius, instead of a floating capsule.
+    var notchBottomRadius: CGFloat? = nil
+
+    /// The blob outline — a capsule normally, a notch silhouette in notch mode.
+    private var shellShape: AnyShape {
+        if let r = notchBottomRadius { return AnyShape(NotchShape(bottomRadius: r)) }
+        return AnyShape(Capsule())
+    }
 
     /// Glyph point size, scaled to the bar height so it stays proportional as
     /// the island morphs between idle and compact heights.
@@ -43,8 +52,9 @@ struct IslandExtensionView: View {
         .font(.system(size: icon, weight: .bold))
         .foregroundStyle(model.tint)
         .frame(width: Self.width(for: model, height: height), height: height)
-        .background(Capsule().fill(Palette.background))
-        .overlay(Capsule().stroke(model.tint.opacity(0.35), lineWidth: 0.8))
+        .background(shellShape.fill(Palette.background))
+        .overlay(shellShape.stroke(model.tint.opacity(IslandConfiguration.default.notchStrokeOpacity),
+                                   lineWidth: IslandConfiguration.default.notchStrokeWidth))
         .shellShadow()
     }
 }

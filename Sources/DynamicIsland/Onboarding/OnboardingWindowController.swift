@@ -56,7 +56,16 @@ final class OnboardingWindowController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.ignoresMouseEvents = false
 
-        let root = OnboardingView(coordinator: coordinator)
+        // Hand off to a notch-integrated island if the target display has a notch
+        // and notch mode is on — the closing beat then collapses into the notch.
+        let notch: NotchGeometry? = {
+            guard !preview, let geo = NotchDetector.geometry(for: screen),
+                  let num = DisplayCatalog.displayID(of: screen),
+                  let pid = DisplayCatalog.persistentID(for: num),
+                  settings.usesNotchMode(onDisplay: pid, hasNotch: true) else { return nil }
+            return geo
+        }()
+        let root = OnboardingView(coordinator: coordinator, notch: notch)
             .environmentObject(settings)
         // FirstMouse so buttons fire on the FIRST click even when the window isn't
         // key (e.g. right after returning from System Settings).
@@ -152,8 +161,9 @@ final class OnboardingWindowController {
     }
 
     private static func targetScreen() -> NSScreen {
-        if #available(macOS 12.0, *),
-           let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
+        // Prefer a notched display (via NotchDetector so DI_MOCK_NOTCH is honoured),
+        // so onboarding runs on — and hands off to — the notch island's screen.
+        if let notched = NSScreen.screens.first(where: { NotchDetector.geometry(for: $0) != nil }) {
             return notched
         }
         return NSScreen.main ?? NSScreen.screens.first!

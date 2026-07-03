@@ -10,13 +10,24 @@ struct SecondaryAppIslandView: View {
     @ObservedObject var controller: DynamicIslandController
     let island: DynamicIslandController.SecondaryIsland
     let height: CGFloat
+    /// When set, the pill is its own mini-notch: flush to the top with a square
+    /// top and this bottom-corner radius, instead of a floating capsule.
+    var notchBottomRadius: CGFloat? = nil
+
+    private var config: IslandConfiguration { controller.configuration }
+
+    /// The pill outline — a capsule normally, a notch silhouette in notch mode.
+    private var shellShape: AnyShape {
+        if let r = notchBottomRadius { return AnyShape(NotchShape(bottomRadius: r)) }
+        return AnyShape(Capsule())
+    }
 
     /// Music is a circle (bar height); a timer chip adds room for its readout.
     static func width(for island: DynamicIslandController.SecondaryIsland,
                       height: CGFloat) -> CGFloat {
         switch island.kind {
         case .music: return height
-        case .timer: return height + 54
+        case .timer: return height + IslandConfiguration.default.notchTimerChipReadout
         }
     }
 
@@ -28,8 +39,9 @@ struct SecondaryAppIslandView: View {
             }
         }
         .frame(width: Self.width(for: island, height: height), height: height)
-        .background(Capsule().fill(Palette.background))
-        .overlay(Capsule().stroke(strokeTint.opacity(0.32), lineWidth: 0.8))
+        .background(shellShape.fill(Palette.background))
+        .overlay(shellShape.stroke(strokeTint.opacity(config.notchStrokeOpacity),
+                                   lineWidth: config.notchStrokeWidth))
         .overlay { ringingOverlay }
         .overlay(alignment: .topTrailing) { moreDot }
         .shellShadow()
@@ -50,7 +62,7 @@ struct SecondaryAppIslandView: View {
     @ViewBuilder
     private var ringingOverlay: some View {
         if case .timer(let timer, _) = island.kind, timer.hasFired {
-            RingingGlowOverlay(shape: Capsule())
+            RingingGlowOverlay(shape: shellShape)
         }
     }
 
@@ -60,22 +72,29 @@ struct SecondaryAppIslandView: View {
         if case .timer(_, let showsMore) = island.kind, showsMore {
             Circle()
                 .fill(Palette.green)
-                .frame(width: 8, height: 8)
-                .overlay(Circle().stroke(Palette.background, lineWidth: 1.5))
-                .offset(x: -3, y: 3)
+                .frame(width: config.notchMoreDotSize, height: config.notchMoreDotSize)
+                .overlay(Circle().stroke(Palette.background, lineWidth: config.notchMoreDotStroke))
+                .offset(x: -Spacing.xxs, y: Spacing.xxs)
         }
     }
 
     private func timerChip(_ timer: IslandTimer) -> some View {
-        let iconSize = max(11, height * 0.32)
+        // In notch mode, match the main timer lobe exactly (glyph + headline value)
+        // so text/icons line up across islands; floating keeps its bar-relative size.
+        let isNotch = notchBottomRadius != nil
+        let iconSize = isNotch ? IconSize.lg : max(IconSize.sm, height * config.notchGlyphRatio)
         return HStack(spacing: Spacing.sm) {
             Image(systemName: timer.kind == .stopwatch ? "stopwatch" : "timer")
-                .font(.system(size: iconSize, weight: .bold))
+                .font(.system(size: iconSize, weight: isNotch ? .semibold : .bold))
                 .foregroundStyle(strokeTint)
             TimelineView(.periodic(from: .now, by: 0.2)) { context in
-                Text(formatClock(timer.displayValue(at: context.date)))
-                    .font(.system(size: iconSize, weight: .bold).monospacedDigit())
+                let clock = Text(formatClock(timer.displayValue(at: context.date)))
                     .foregroundStyle(Palette.textPrimary)
+                if isNotch {
+                    clock.font(Typography.headlineMono)
+                } else {
+                    clock.font(.system(size: iconSize, weight: .bold).monospacedDigit())
+                }
             }
         }
     }
@@ -88,11 +107,11 @@ struct SecondaryAppIslandView: View {
                     .scaledToFill()
             } else {
                 Image(systemName: "music.note")
-                    .font(.system(size: max(11, height * 0.4), weight: .bold))
+                    .font(.system(size: max(IconSize.sm, height * config.notchBubbleGlyphRatio), weight: .bold))
                     .foregroundStyle(strokeTint)
             }
         }
-        .frame(width: height - 8, height: height - 8)
+        .frame(width: height - 2 * Spacing.xs, height: height - 2 * Spacing.xs)
         .clipShape(Circle())
     }
 }
