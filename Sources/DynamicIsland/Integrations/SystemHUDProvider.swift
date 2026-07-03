@@ -436,7 +436,7 @@ final class SystemHUDProvider: IslandContentProvider {
             if let level = ddc.adjustAudio(display, bySteps: direction * steps) {
                 HUDDebug.log("volume external display=\(display) steps=\(steps) → level=\(level)")
                 controller?.presentHUD(SystemHUD(kind: .volume, level: level, muted: false),
-                                       direction: direction)
+                                       direction: direction, onDisplay: cursorDisplay())
                 return
             }
         }
@@ -459,7 +459,7 @@ final class SystemHUDProvider: IslandContentProvider {
         // Any volume key un-mutes, matching the system behaviour.
         Self.setMuted(false, of: device)
         controller?.presentHUD(SystemHUD(kind: .volume, level: Double(next), muted: false),
-                               direction: direction)
+                               direction: direction, onDisplay: cursorDisplay())
     }
 
     private func toggleMute() {
@@ -468,7 +468,7 @@ final class SystemHUDProvider: IslandContentProvider {
         Self.setMuted(nowMuted, of: device)
         let level = Double(Self.volume(of: device) ?? 0)
         controller?.presentHUD(SystemHUD(kind: .volume, level: level, muted: nowMuted),
-                               direction: 0)
+                               direction: 0, onDisplay: cursorDisplay())
     }
 
     private func adjustBrightness(_ display: CGDirectDisplayID, by delta: Float,
@@ -478,7 +478,7 @@ final class SystemHUDProvider: IslandContentProvider {
            let level = ddc.adjust(display, bySteps: direction * max(1, steps)) {
             HUDDebug.log("brightness external(DDC) display=\(display) steps=\(steps) → level=\(level)")
             controller?.presentHUD(SystemHUD(kind: .brightness, level: level),
-                                   direction: direction)
+                                   direction: direction, onDisplay: cursorDisplay())
             return
         }
         // Built-in, or an Apple external panel → DisplayServices. Only present the HUD
@@ -493,7 +493,7 @@ final class SystemHUDProvider: IslandContentProvider {
         guard Self.setBrightness(next, display: display) else { return }
         HUDDebug.log("brightness DisplayServices display=\(display) \(current) → \(next)")
         controller?.presentHUD(SystemHUD(kind: .brightness, level: Double(next)),
-                               direction: direction)
+                               direction: direction, onDisplay: cursorDisplay())
     }
 
     /// Step the keyboard backlight and present the island HUD. Mirrors
@@ -515,7 +515,7 @@ final class SystemHUDProvider: IslandContentProvider {
         KeyboardBacklight.setLevel(next)
         HUDDebug.log("keyboard backlight \(base) → \(next)")
         controller?.presentHUD(SystemHUD(kind: .keyboardBacklight, level: Double(next)),
-                               direction: direction)
+                               direction: direction, onDisplay: cursorDisplay())
     }
 
     /// Toggle the backlight off ↔ its last on-level, like the system's F-key.
@@ -532,7 +532,7 @@ final class SystemHUDProvider: IslandContentProvider {
         KeyboardBacklight.setLevel(next)
         HUDDebug.log("keyboard backlight toggle \(current) → \(next)")
         controller?.presentHUD(SystemHUD(kind: .keyboardBacklight, level: Double(next)),
-                               direction: next > current ? 1 : -1)
+                               direction: next > current ? 1 : -1, onDisplay: cursorDisplay())
     }
 
     // MARK: C tap callback

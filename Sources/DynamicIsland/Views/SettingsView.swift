@@ -284,24 +284,29 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             rowLabel("Show the island on", systemImage: "display.2")
             let displays = DisplayCatalog.connected()
+            let enabledCount = displays.filter { settings.showsIsland(onDisplay: $0.id) }.count
             if displays.isEmpty {
                 Text("No displays detected.")
                     .font(Typography.callout).foregroundStyle(Palette.textSecondary)
             } else {
                 VStack(spacing: Spacing.md) {
                     ForEach(displays) { d in
+                        // The last enabled display can't be turned off — the island
+                        // always appears on at least one screen.
+                        let isOnly = settings.showsIsland(onDisplay: d.id) && enabledCount <= 1
                         toggleRow(d.isMain ? "\(d.name) (Main)" : d.name,
                                   systemImage: d.isMain ? "display" : "display.2",
                                   isOn: Binding(
                                     get: { settings.showsIsland(onDisplay: d.id) },
                                     set: { on in
                                         if on { settings.islandDisplayOptOut.remove(d.id) }
-                                        else { settings.islandDisplayOptOut.insert(d.id) }
+                                        else if enabledCount > 1 { settings.islandDisplayOptOut.insert(d.id) }
                                     }))
+                        .disabled(isOnly)
                     }
                 }
             }
-            Text("With several displays enabled, the island follows the screen your cursor is on — so brightness and volume act on that screen and their HUD shows there.")
+            Text("The island appears on every enabled display. The screen your cursor is on is the one that expands and shows brightness/volume changes. At least one display always stays on.")
                 .font(Typography.footnote)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

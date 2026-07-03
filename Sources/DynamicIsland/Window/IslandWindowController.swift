@@ -1,21 +1,26 @@
 import AppKit
+import Combine
 import SwiftUI
 
-/// Owns the island panel: builds it, hosts the SwiftUI view, pins it to the
-/// top-centre of the display, and keeps it there when the screen layout
-/// changes (resolution change, display connect/disconnect, etc.).
+/// Owns the island panels: one per enabled+connected display, so the island is
+/// cloned onto each screen. Hover / clicks / scroll / the pin corner are routed to
+/// whichever panel the cursor is over; the shared `DynamicIslandController` resolves
+/// per-display state (only the screen under the cursor expands; a HUD shows only on
+/// its screen).
 @MainActor
 final class IslandWindowController: NSObject {
 
     private let controller: DynamicIslandController
     private let configuration: IslandConfiguration
-    private let panel: IslandPanel
+
+    /// One panel per enabled+connected display.
+    private var panels: [CGDirectDisplayID: IslandPanel] = [:]
+    /// The display the cursor is currently over (has a panel), for routing.
+    private var activeDisplayID: CGDirectDisplayID?
+    /// The panel under the cursor, else any panel (for focus/keyboard).
+    private var activePanel: IslandPanel? { (activeDisplayID.flatMap { panels[$0] }) ?? panels.values.first }
 
     private var hoverTimer: Timer?
-
-    /// The display the panel is currently anchored to (so the idle island only
-    /// re-anchors when the cursor's enabled display actually changes).
-    private var currentDisplayID: CGDirectDisplayID?
 
     /// Pending collapse, scheduled when the pointer leaves and cancelled if it
     /// comes back — see `updateHover`.
@@ -23,71 +28,62 @@ final class IslandWindowController: NSObject {
 
     /// For the `.click` / `.scroll` expand triggers: whether the user has performed
     /// the trigger gesture during the current visit, so the island should stay
-    /// expanded while the pointer remains over it. Reset only when it fully
-    /// collapses (so a quick edge-skim re-entry stays open). Always "true" in
-    /// effect for `.hover`, where merely being inside expands.
+    /// expanded while the pointer remains over it.
     private var expansionCommitted = false
 
-    /// Forgiveness margin (points) around the COMPACT pill for hit-testing, so the
-    /// pointer can slip slightly past the edge without collapsing the player.
+    /// Forgiveness margin around the COMPACT pill for hit-testing.
     private let hoverPadding: CGFloat = 8
-
-    /// A more generous margin once the island is EXPANDED: the keep-open region the
-    /// pointer must stay within is enlarged so small drifts (reaching for a control
-    /// near the edge, overshooting a button) don't collapse the card.
+    /// A more generous margin once the island is EXPANDED.
     private let expandedHoverPadding: CGFloat = 26
-
-    /// The effective forgiveness margin for the current state — bigger when expanded.
+    /// The effective margin for the active display — bigger when its card is expanded.
     private var activeHoverPadding: CGFloat {
-        controller.mode.isExpanded ? expandedHoverPadding : hoverPadding
+        let expanded = activeDisplayID.map { controller.mode(for: $0).isExpanded } ?? false
+        return expanded ? expandedHoverPadding : hoverPadding
     }
 
-    /// How long the island stays expanded after the pointer leaves before it
-    /// collapses. A brief grace makes re-entry feel sticky/magnetic and stops
-    /// the player flickering shut when the pointer skims the edge — short enough
-    /// that an intentional exit still feels responsive.
+    /// How long the island stays expanded after the pointer leaves before collapsing.
     private let exitGrace: TimeInterval = 0.13
 
     // MARK: Scroll-to-switch state
 
-    /// Accumulated scroll delta toward the next app switch (reset on each switch
-    /// and when the gesture leaves a switch zone).
     private var scrollAccum: CGFloat = 0
-    /// When the last scroll-driven app switch happened — a cooldown so one flick
-    /// (or a fast burst of wheel notches) advances a single app, not several.
     private var lastScrollSwitch: Date = .distantPast
     private let scrollSwitchCooldown: TimeInterval = 0.3
-    /// Accumulated scroll needed to switch. Mouse wheels report small per-notch
-    /// deltas (so one notch flips), trackpads report large precise deltas (so a
-    /// deliberate swipe is required).
     private func scrollThreshold(precise: Bool) -> CGFloat { precise ? 28 : 1 }
-    /// Local monitor that gets first look at every scroll wheel event over the
-    /// panel — BEFORE any `NSScrollView` (even a non-overflowing one) eats it.
     private var scrollMonitor: Any?
     private let scrollDebug = ProcessInfo.processInfo.environment["DI_DEBUG_SCROLL"] == "1"
+    private var cancellables: Set<AnyCancellable> = []
 
     init(controller: DynamicIslandController) {
         self.controller = controller
         self.configuration = controller.configuration
-
-        let canvas = NSRect(x: 0, y: 0,
-                            width: configuration.canvasWidth,
-                            height: configuration.canvasHeight)
-        panel = IslandPanel(contentRect: canvas, configuration: configuration)
-
         super.init()
 
-        let root = DynamicIslandView(controller: controller)
+        // Editing a timer name / search field needs the keyboard, so focus the
+        // (normally non-activating) panel while a text field is up, then hand it back.
+        controller.onEditingChange = { [weak self] editing in
+            self?.setPanelEditing(editing)
+        }
+    }
+
+    // MARK: Panels
+
+    /// Build a panel for `displayID`, hosting the island bound to that display, with
+    /// the popup / click-to-expand handlers wired to it.
+    private func makePanel(displayID: CGDirectDisplayID, screen: NSScreen) -> IslandPanel {
+        let canvas = NSRect(x: 0, y: 0, width: configuration.canvasWidth, height: configuration.canvasHeight)
+        let panel = IslandPanel(contentRect: canvas, configuration: configuration)
+
+        let root = DynamicIslandView(controller: controller, displayID: displayID)
             .environmentObject(controller.settings)
         let hosting = FirstMouseHostingView(rootView: root)
         hosting.frame = canvas
         hosting.autoresizingMask = [.width, .height]
         panel.contentView = hosting
 
-        // While a popup owns the island, clicks act on it: left-click opens its
-        // app (or dismisses), right-click dismisses. With no popup these return
-        // false, so normal SwiftUI controls (transport, sidebar, gear) get the
-        // click as before.
+        // While a popup owns the island, clicks act on it (left = open/dismiss,
+        // right = dismiss). With no popup these return false so SwiftUI controls
+        // (transport, sidebar, gear) get the click as before.
         hosting.onMouseDown = { [weak self] in
             guard let self else { return false }
             if self.controller.activePopup != nil {
@@ -98,16 +94,15 @@ final class IslandWindowController: NSObject {
                 self.controller.activatePopup()
                 if opensApp {
                     self.expansionCommitted = true
-                    self.controller.interactionHandler?.pointerDidEnter()
+                    self.controller.interactionHandler?.pointerDidEnter(display: displayID)
                 }
                 return true
             }
-            // Click-to-expand: when that trigger is selected and the card is still
-            // compact, the first click on the pill commits the expansion (and is
-            // consumed). Once expanded, clicks fall through to the controls.
-            if self.controller.settings.expandTrigger == .click, !self.controller.mode.isExpanded {
+            // Click-to-expand: on the `.click` trigger, the first click on this
+            // display's compact pill commits its expansion (and is consumed).
+            if self.controller.settings.expandTrigger == .click, !self.controller.mode(for: displayID).isExpanded {
                 self.expansionCommitted = true
-                self.controller.interactionHandler?.pointerDidEnter()
+                self.controller.interactionHandler?.pointerDidEnter(display: displayID)
                 return true
             }
             return false
@@ -118,44 +113,74 @@ final class IslandWindowController: NSObject {
             return true
         }
 
-        // Editing a timer name needs the keyboard, so focus the (normally
-        // non-activating) panel while a text field is up, then hand focus back.
-        controller.onEditingChange = { [weak self] editing in
-            self?.setPanelEditing(editing)
+        position(panel, on: screen)
+        panel.acceptsMouseMovedEvents = true
+        panel.orderFrontRegardless()
+        return panel
+    }
+
+    /// Anchor a panel so its top edge is flush with the screen's top and its centre
+    /// matches the screen centre (over the notch / menu-bar centre).
+    private func position(_ panel: IslandPanel, on screen: NSScreen) {
+        let frame = screen.frame
+        panel.setFrameOrigin(NSPoint(x: frame.midX - configuration.canvasWidth / 2,
+                                     y: frame.maxY - configuration.canvasHeight))
+    }
+
+    /// Create / remove / reposition panels so there's exactly one per enabled display.
+    private func reconcile() {
+        let wanted = Dictionary(uniqueKeysWithValues: enabledScreens().compactMap { screen in
+            DisplayCatalog.displayID(of: screen).map { ($0, screen) }
+        })
+        for (id, panel) in panels where wanted[id] == nil {
+            panel.orderOut(nil)
+            panels[id] = nil
+        }
+        for (id, screen) in wanted {
+            if let existing = panels[id] { position(existing, on: screen) }
+            else { panels[id] = makePanel(displayID: id, screen: screen) }
         }
     }
 
-    /// Hide / show the island panel (e.g. while the onboarding takeover owns the
-    /// screen, so the real island never peeks through behind it).
-    func setVisible(_ visible: Bool) {
-        if visible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
+    /// The screens the island should appear on — those the user hasn't opted out of.
+    /// Falls back to every screen if they've turned all of them off (so it never
+    /// vanishes).
+    private func enabledScreens() -> [NSScreen] {
+        let enabled = NSScreen.screens.filter { screen in
+            guard let id = DisplayCatalog.displayID(of: screen),
+                  let uuid = DisplayCatalog.persistentID(for: id) else { return true }
+            return controller.settings.showsIsland(onDisplay: uuid)
+        }
+        return enabled.isEmpty ? NSScreen.screens : enabled
     }
 
-    /// The app that was frontmost before the island grabbed focus, so it can be
-    /// handed focus back when the island is done (rather than deactivating to
-    /// whatever macOS picks next).
+    /// Hide / show every island panel (e.g. while the onboarding takeover owns the
+    /// screen, so the real islands never peek through behind it).
+    func setVisible(_ visible: Bool) {
+        for panel in panels.values { visible ? panel.orderFrontRegardless() : panel.orderOut(nil) }
+    }
+
+    // MARK: Keyboard focus (in-island text editing)
+
     private var appToRestoreFocus: NSRunningApplication?
 
-    /// Give/return keyboard focus for in-island text editing (timer names).
+    /// Give/return keyboard focus for in-island text editing — on the panel the
+    /// cursor is over (where the field is).
     private func setPanelEditing(_ editing: Bool) {
         if editing {
-            // Remember who was frontmost (unless it's already us) so focus returns
-            // there afterwards.
             let me = NSRunningApplication.current
             let front = NSWorkspace.shared.frontmostApplication
             if front?.processIdentifier != me.processIdentifier {
                 appToRestoreFocus = front
             }
             NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil)
+            activePanel?.makeKeyAndOrderFront(nil)
         } else {
-            panel.makeFirstResponder(nil)
+            activePanel?.makeFirstResponder(nil)
             restorePreviousAppFocus()
         }
     }
 
-    /// Hand focus back to whoever owned it before the island took over. Falls back
-    /// to a plain deactivate when there's nothing recorded.
     private func restorePreviousAppFocus() {
         if let prev = appToRestoreFocus, !prev.isTerminated {
             appToRestoreFocus = nil
@@ -166,33 +191,31 @@ final class IslandWindowController: NSObject {
         }
     }
 
-    /// Places the panel on screen and starts tracking layout changes.
-    func show() {
-        reposition()
-        panel.acceptsMouseMovedEvents = true
-        panel.orderFrontRegardless()
+    // MARK: Lifecycle
 
-        // Selector-based observation keeps this off the Sendable-closure path.
-        // Screen-parameter changes are posted on the main thread.
+    /// Places the panels on screen and starts tracking layout / setting changes.
+    func show() {
+        reconcile()
+
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(screenParametersDidChange),
-            name: NSApplication.didChangeScreenParametersNotification,
-            object: nil
-        )
+            self, selector: #selector(screenParametersDidChange),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+
+        // Re-clone when the user toggles which displays show the island.
+        controller.settings.$islandDisplayOptOut
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.reconcile() }
+            .store(in: &cancellables)
 
         startHoverTracking()
 
-        // Scroll-to-switch-apps: a local monitor gets first look at every wheel
-        // event over the panel, BEFORE any NSScrollView (even a non-overflowing one)
-        // swallows it. Over a scroll view that can actually scroll we pass the event
-        // through; otherwise (sidebar, music player, short lists) we switch apps.
+        // Scroll-to-switch-apps: a local monitor gets first look at every wheel event
+        // over a panel, before any NSScrollView swallows it.
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             self?.handleScrollEvent(event) ?? event
         }
 
-        // DI_DEBUG_SCROLL=1: dump the NSScrollView hierarchy a few times so we can
-        // see whether SwiftUI's ScrollViews are detectable / sized as expected.
         if ProcessInfo.processInfo.environment["DI_DEBUG_SCROLL"] == "1" {
             for delay in [3.0, 5.0, 7.0] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -203,7 +226,7 @@ final class IslandWindowController: NSObject {
     }
 
     private func debugDumpScrollViews() {
-        guard let root = panel.contentView else { return }
+        guard let root = activePanel?.contentView else { return }
         func err(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
         var total = 0, scrolls = 0
         func walk(_ v: NSView, _ depth: Int) {
@@ -229,19 +252,13 @@ final class IslandWindowController: NSObject {
     }
 
     @objc private func screenParametersDidChange() {
-        reposition()
+        reconcile()
     }
 
     // MARK: Hover
 
-    /// Hover is detected by polling the cursor position on a light timer rather
-    /// than with event monitors. A global `.mouseMoved` monitor only fires for
-    /// events actually delivered to another app, which is unreliable over a
-    /// click-through overlay; polling `NSEvent.mouseLocation` always works,
-    /// needs no permissions, and is cheap (a point read + rect test).
     private func startHoverTracking() {
-        // ~33 Hz: low enough to be cheap (a point read + rect test), fast enough that
-        // the island reacts to the pointer arriving/leaving with no perceptible delay.
+        // ~33 Hz: cheap (a point read + rect tests) and reacts with no perceptible delay.
         let timer = Timer(timeInterval: 0.03, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateHover() }
         }
@@ -250,92 +267,91 @@ final class IslandWindowController: NSObject {
     }
 
     private func updateHover() {
-        // Multi-display: keep the idle island on the cursor's enabled screen.
-        followCursorIfIdle()
         let location = NSEvent.mouseLocation
 
-        // Popups own the island and suppress hover-to-expand. While one is up we
-        // keep capturing clicks (so the popup is actionable) and track whether
-        // the pointer is over it, growing it a little. For the immunity tail
-        // after it clears we keep the island collapsed so it doesn't snap open
-        // the instant the popup goes away.
+        // The panel on the display the cursor is over (if that display shows the island).
+        let cursorDisplay = NSScreen.screens.first { $0.frame.contains(location) }
+            .flatMap { DisplayCatalog.displayID(of: $0) }
+        let active: (id: CGDirectDisplayID, panel: IslandPanel)? =
+            cursorDisplay.flatMap { id in panels[id].map { (id, $0) } }
+        activeDisplayID = active?.id
+
+        // Only the panel under the cursor may capture events; the rest pass through.
+        for (id, panel) in panels where id != active?.id { panel.ignoresMouseEvents = true }
+
+        // Popups own the island (cloned on every screen); the active panel captures +
+        // grows it. For the immunity tail after it clears we keep collapsed.
         if controller.activePopup != nil {
             exitWorkItem?.cancel(); exitWorkItem = nil
-            panel.ignoresMouseEvents = false
-            controller.setPopupHovered(
-                islandScreenRect(inflatedBy: activeHoverPadding).contains(location))
-            if controller.isHovered { controller.setHovered(false) }
+            if let active {
+                active.panel.ignoresMouseEvents = false
+                controller.setPopupHovered(
+                    islandRect(for: active.panel, displayID: active.id, inflatedBy: activeHoverPadding).contains(location))
+            } else {
+                controller.setPopupHovered(false)
+            }
+            if controller.isHovered { controller.setHovered(nil) }
             return
         }
         if controller.blocksHoverActivation {
-            panel.ignoresMouseEvents = true
-            if controller.isHovered { controller.setHovered(false) }
+            active?.panel.ignoresMouseEvents = true
+            if controller.isHovered { controller.setHovered(nil) }
             return
         }
 
-        // The whole island is hoverable — including the idle pill, so hovering it
-        // expands into the app sidebar. `inside` tracks the POINTER itself (not the
-        // editing state): when the pointer clearly leaves while a text field is
-        // focused, the exit path below ends editing and lets the island collapse,
-        // rather than a focused field pinning it open forever.
-        let inside = islandScreenRect(inflatedBy: activeHoverPadding).contains(location)
+        guard let active else {
+            // Cursor isn't over any island's screen → outside every island.
+            handleOutside()
+            return
+        }
+
+        // `inside` tracks the POINTER over the active display's island — not the
+        // editing state — so a clear exit while a field is focused ends editing.
+        let inside = islandRect(for: active.panel, displayID: active.id, inflatedBy: activeHoverPadding).contains(location)
 
         if inside {
-            // Re-entered before the grace timer fired — cancel any pending
-            // collapse and resume capturing events so the pill is clickable /
-            // scrollable (which is how the click/scroll triggers commit).
-            exitWorkItem?.cancel()
-            exitWorkItem = nil
-            panel.ignoresMouseEvents = false
+            exitWorkItem?.cancel(); exitWorkItem = nil
+            active.panel.ignoresMouseEvents = false
 
-            // Whether the island should be EXPANDED right now. For `.hover` just
-            // being inside is enough; `.click`/`.scroll` wait for the gesture
-            // (`expansionCommitted`), set in the mouse-down / scroll handlers.
-            // An already-expanded card stays expanded while the pointer is still
-            // inside it — so e.g. changing the expand-trigger setting (which lives
-            // INSIDE the expanded card) never collapses the card out from under you.
+            // For `.hover` just being inside expands; `.click`/`.scroll` wait for the
+            // committed gesture. An already-expanded card stays open while inside.
             let shouldExpand = controller.settings.expandTrigger == .hover
                 || expansionCommitted
                 || controller.pinned
                 || controller.isEditing
-                || controller.mode.isExpanded
+                || controller.mode(for: active.id).isExpanded
 
             if shouldExpand {
-                controller.interactionHandler?.pointerDidEnter()
-                // (The Music player's volume row is toggled by tapping the speaker
-                // icon — see `toggleVolumeReveal` — so there are no geometry-based
-                // music hover zones to update here anymore.)
-                // Reveal the pin affordance while the pointer is over the card's
-                // top-right corner (only when there's an expanded card to pin).
-                controller.setPinCornerHovered(controller.mode.isExpanded && pinCornerRect().contains(location))
+                controller.interactionHandler?.pointerDidEnter(display: active.id)
+                controller.setPinCornerHovered(controller.mode(for: active.id).isExpanded
+                    && pinCornerRect(for: active.panel, displayID: active.id).contains(location))
             } else {
-                // Over the compact pill, waiting for the click/scroll gesture:
-                // capture events (to detect it) but stay collapsed.
-                if controller.isHovered { controller.setHovered(false) }
+                // Over the compact pill, waiting for the click/scroll gesture: capture
+                // events (to detect it) but stay collapsed.
+                if controller.hoveredDisplay == active.id { controller.setHovered(nil) }
                 controller.setPinCornerHovered(false)
             }
         } else {
-            // Stop blocking events immediately, but hold the expanded state for
-            // a short grace so a quick re-entry doesn't cause a flicker.
-            panel.ignoresMouseEvents = true
+            active.panel.ignoresMouseEvents = true
             controller.setPinCornerHovered(false)
-            // Editing keeps the island expanded (so it stays open while you type with
-            // the pointer inside), so a focused field must also go through the grace
-            // timer on exit — that's what ends editing and unfocuses the field.
-            if controller.isHovered || controller.isEditing {
-                scheduleExitIfNeeded()
-            } else {
-                expansionCommitted = false
-                controller.interactionHandler?.pointerDidExit()
-            }
+            handleOutside()
         }
     }
 
-    /// Screen-coord zone over the expanded card's top-right corner, where the pin
-    /// affordance sits. A generous square straddling the corner so the thumbtack
-    /// is easy to summon and stays summoned while the pointer is on the button.
-    private func pinCornerRect() -> NSRect {
-        let size = controller.geometry.size
+    /// Exit path when the cursor is outside every island — hold the expanded state
+    /// briefly (grace), or collapse if nothing keeps it open.
+    private func handleOutside() {
+        if controller.isHovered || controller.isEditing {
+            scheduleExitIfNeeded()
+        } else {
+            expansionCommitted = false
+            controller.interactionHandler?.pointerDidExit()
+        }
+    }
+
+    /// Zone over the active card's top-right corner, where the pin affordance sits.
+    private func pinCornerRect(for panel: IslandPanel, displayID: CGDirectDisplayID) -> NSRect {
+        let size = controller.geometry(for: displayID).size
         let rightX = panel.frame.midX + size.width / 2
         let topY = panel.frame.maxY - configuration.topInset
         let reach: CGFloat = 52   // inward from the corner
@@ -343,23 +359,22 @@ final class IslandWindowController: NSObject {
         return NSRect(x: rightX - reach, y: topY - reach, width: reach + out, height: reach + out)
     }
 
-    /// Arms a one-shot collapse `exitGrace` from now (if not already armed). It
-    /// re-checks the pointer when it fires, so a return inside the window — even
-    /// one the poll missed — keeps the island open.
+    /// Arms a one-shot collapse `exitGrace` from now (if not already armed). When it
+    /// fires it re-checks whether the pointer is over ANY island (a re-entry — even
+    /// onto another display's island — keeps things open).
     private func scheduleExitIfNeeded() {
         guard exitWorkItem == nil else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.exitWorkItem = nil
-            let outside = !self.islandScreenRect(inflatedBy: self.activeHoverPadding)
-                .contains(NSEvent.mouseLocation)
-            if outside {
-                // End any text editing (the Music search field, a timer rename) so a
-                // focused field doesn't pin the island open after the pointer has
-                // clearly left — previously `isEditing` blocked this collapse entirely.
+            let loc = NSEvent.mouseLocation
+            let overAny = self.panels.contains { id, panel in
+                self.islandRect(for: panel, displayID: id, inflatedBy: self.activeHoverPadding).contains(loc)
+            }
+            if !overAny {
+                // End any text editing so a focused field doesn't pin the island open
+                // after the pointer has clearly left.
                 if self.controller.isEditing { self.controller.endEditing() }
-                // Fully collapsing now — require the click/scroll gesture again
-                // next visit.
                 self.expansionCommitted = false
                 self.controller.interactionHandler?.pointerDidExit()
             }
@@ -368,16 +383,11 @@ final class IslandWindowController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + exitGrace, execute: work)
     }
 
-    /// The island's hover hitbox in screen coordinates (Cocoa, bottom-left
-    /// origin) — centred horizontally on the visible blob.
-    ///
-    /// The visible blob floats `topInset` below the screen's top edge (that gap
-    /// is shadow room), but the HITBOX is stretched all the way up to the top of
-    /// the screen so the pointer can trigger the island by slamming to the top
-    /// edge — there's no dead strip above it. The bottom and width still match
-    /// the visible blob, so only the top edge moves.
-    private func islandScreenRect(inflatedBy padding: CGFloat = 0) -> NSRect {
-        let size = controller.geometry.size
+    /// A panel's island hitbox in screen coordinates. The visible blob floats
+    /// `topInset` below the screen top (shadow room), but the hitbox stretches to the
+    /// very top edge so slamming the pointer up triggers the island.
+    private func islandRect(for panel: IslandPanel, displayID: CGDirectDisplayID, inflatedBy padding: CGFloat = 0) -> NSRect {
+        let size = controller.geometry(for: displayID).size
         let frame = panel.frame
         let bottomY = frame.maxY - configuration.topInset - size.height
         let topY = frame.maxY  // screen top edge — no gap above the blob
@@ -390,23 +400,24 @@ final class IslandWindowController: NSObject {
 
     // MARK: Scroll to switch apps
 
-    /// First-look handler for the local scroll monitor. Returns `nil` to consume
-    /// the event (an app switch) or the event itself to let it reach the view under
+    /// First-look handler for the local scroll monitor. Returns `nil` to consume the
+    /// event (an app switch / expansion) or the event to let it reach the view under
     /// the cursor (a scrollable list / strip).
     private func handleScrollEvent(_ event: NSEvent) -> NSEvent? {
-        guard event.window === panel else { return event }
-        // Scroll-to-expand: when that trigger is selected and the card is still
-        // compact, a DOWNWARD scroll over the pill commits the expansion. (Under
-        // natural scrolling a downward gesture reports a negative deltaY.)
-        if controller.settings.expandTrigger == .scroll, !controller.mode.isExpanded {
+        guard let win = event.window as? IslandPanel,
+              let displayID = panels.first(where: { $0.value === win })?.key else { return event }
+
+        // Scroll-to-expand: on the `.scroll` trigger, a downward scroll over this
+        // display's compact pill commits its expansion.
+        if controller.settings.expandTrigger == .scroll, !controller.mode(for: displayID).isExpanded {
             if event.scrollingDeltaY < 0 {
                 expansionCommitted = true
-                controller.interactionHandler?.pointerDidEnter()
+                controller.interactionHandler?.pointerDidEnter(display: displayID)
                 return nil
             }
             return event
         }
-        if isOverScrollable(event) {
+        if isOverScrollable(event, in: win) {
             if scrollDebug { logScroll("pass→content", event) }
             return event
         }
@@ -415,10 +426,8 @@ final class IslandWindowController: NSObject {
         return consumed ? nil : event
     }
 
-    /// Whether the pointer is over a scroll view (a SwiftUI `ScrollView` or our
-    /// `HWheelScroll`) whose content actually overflows — i.e. there's something to
-    /// scroll. Walks up from the deepest view under the cursor to the hosting view.
-    private func isOverScrollable(_ event: NSEvent) -> Bool {
+    /// Whether the pointer is over an overflowing scroll view in `panel`.
+    private func isOverScrollable(_ event: NSEvent, in panel: IslandPanel) -> Bool {
         guard let root = panel.contentView, let hit = root.hitTest(event.locationInWindow) else { return false }
         var view: NSView? = hit
         while let cur = view {
@@ -432,7 +441,6 @@ final class IslandWindowController: NSObject {
     private static func canScroll(_ scroll: NSScrollView) -> Bool {
         guard let doc = scroll.documentView else { return false }
         let clip = scroll.contentView.bounds.size
-        // Overflows vertically (a list) or horizontally (a wheel-driven strip).
         return doc.frame.height > clip.height + 1 || doc.frame.width > clip.width + 1
     }
 
@@ -441,21 +449,16 @@ final class IslandWindowController: NSObject {
             "[scroll] \(decision) dy=\(Int(event.scrollingDeltaY)) precise=\(event.hasPreciseScrollingDeltas)\n".utf8))
     }
 
-    /// Advance the main-island app for a scroll the monitor decided isn't over
-    /// scrollable content. Returns `true` when consumed. Only switches while
-    /// expanded; one app per gesture (threshold + cooldown).
+    /// Advance the main-island app for a scroll not over scrollable content. Only
+    /// switches while the focused island is expanded; one app per gesture.
     private func handleScroll(deltaY: CGFloat, precise: Bool) -> Bool {
         guard case .expanded = controller.mode else {
             scrollAccum = 0
             return false
         }
-        // Accumulate until we cross the threshold, then advance one app and start a
-        // cooldown that swallows the rest of the gesture (trackpad momentum / a
-        // rapid burst of wheel notches).
         if Date().timeIntervalSince(lastScrollSwitch) > scrollSwitchCooldown {
             scrollAccum += deltaY
             if abs(scrollAccum) >= scrollThreshold(precise: precise) {
-                // Scroll down (negative delta under natural scrolling) → next app.
                 controller.cycleApp(by: scrollAccum < 0 ? 1 : -1)
                 scrollAccum = 0
                 lastScrollSwitch = Date()
@@ -464,54 +467,5 @@ final class IslandWindowController: NSObject {
             scrollAccum = 0
         }
         return true
-    }
-
-    // MARK: Positioning
-
-    /// Anchors the canvas so its top edge is flush with the top of the display
-    /// and its horizontal centre matches the display's centre — i.e. over the
-    /// notch / menu-bar centre. The gap below the top edge is applied inside
-    /// the view (`configuration.topInset`), leaving room for the shadow.
-    private func reposition() {
-        guard let screen = targetScreen() else { return }
-        currentDisplayID = DisplayCatalog.displayID(of: screen)
-        let frame = screen.frame
-        let origin = NSPoint(
-            x: frame.midX - configuration.canvasWidth / 2,
-            y: frame.maxY - configuration.canvasHeight
-        )
-        panel.setFrameOrigin(origin)
-    }
-
-    /// While the island is idle/compact, keep it on the display the cursor is using
-    /// (among the displays the user enabled) — so brightness/volume control and their
-    /// HUD land on that screen. Skipped while expanded / a popup / a HUD is up so the
-    /// island never hops out from under an interaction.
-    private func followCursorIfIdle() {
-        guard !controller.mode.isExpanded, controller.activePopup == nil, controller.activeHUD == nil,
-              let target = targetScreen(),
-              DisplayCatalog.displayID(of: target) != currentDisplayID
-        else { return }
-        reposition()
-    }
-
-    /// The screen the island should sit on: an enabled display under the cursor,
-    /// else a notched enabled display, else the main/first. Falls back to ALL screens
-    /// if the user has (somehow) turned every display off, so it never vanishes.
-    private func targetScreen() -> NSScreen? {
-        let enabled = NSScreen.screens.filter { screen in
-            guard let id = DisplayCatalog.displayID(of: screen),
-                  let uuid = DisplayCatalog.persistentID(for: id) else { return true }
-            return controller.settings.showsIsland(onDisplay: uuid)
-        }
-        let pool = enabled.isEmpty ? NSScreen.screens : enabled
-        if let underCursor = pool.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) {
-            return underCursor
-        }
-        if #available(macOS 12.0, *),
-           let notched = pool.first(where: { $0.safeAreaInsets.top > 0 }) {
-            return notched
-        }
-        return pool.first(where: { $0 == NSScreen.main }) ?? pool.first
     }
 }

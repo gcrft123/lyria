@@ -11,6 +11,17 @@ struct DynamicIslandView: View {
     @ObservedObject var controller: DynamicIslandController
     @EnvironmentObject var settings: AppSettings
 
+    /// The display this panel renders on. All per-display state — which island is
+    /// expanded, which shows the HUD — is resolved against it, so cloned islands on
+    /// other screens stay compact while the one under the cursor expands.
+    var displayID: CGDirectDisplayID = CGMainDisplayID()
+
+    /// This display's island mode + geometry.
+    private var mode: IslandMode { controller.mode(for: displayID) }
+    private var geometry: IslandGeometry { controller.geometry(for: displayID) }
+    /// Whether THIS display's island is pinned open.
+    private var isPinned: Bool { controller.pinnedDisplay == displayID }
+
     /// Transient "nudge" applied on each volume/brightness keypress: the bubble
     /// pops a touch bigger and kicks horizontally in the direction of the change
     /// (right = louder/brighter, left = quieter/dimmer), then springs back.
@@ -40,10 +51,9 @@ struct DynamicIslandView: View {
     private var sideSpring: Animation { Motion.side }
 
     var body: some View {
-        let geometry = controller.geometry
         let shape = IslandShape(cornerRadius: geometry.cornerRadius)
         let accent = mainAccent
-        let glowing = controller.mode.isExpanded
+        let glowing = mode.isExpanded
         let intensity = settings.glowIntensity
 
         // The black shell sizes and morphs in ISOLATION from its content. The
@@ -62,7 +72,7 @@ struct DynamicIslandView: View {
             // there's room — never reflowing mid-resize, never nudging the shell.
             .overlay {
                 content
-                    .animation(contentMorph, value: controller.mode)
+                    .animation(contentMorph, value: mode)
             }
             .clipShape(shape)
             .overlay(
@@ -150,11 +160,11 @@ struct DynamicIslandView: View {
     /// `raised` (solid + shadow) so it reads as detached where it overlaps the edge.
     @ViewBuilder
     private var pinControl: some View {
-        if controller.mode.isExpanded {
-            let show = controller.pinned || controller.pinCornerHovered
-            IconButton(system: controller.pinned ? "xmark" : "pin.fill",
+        if mode.isExpanded {
+            let show = isPinned || controller.pinCornerHovered
+            IconButton(system: isPinned ? "xmark" : "pin.fill",
                        size: .compact, weight: .bold,
-                       raised: true, active: controller.pinned) {
+                       raised: true, active: isPinned) {
                 controller.togglePin()
             }
             .opacity(show ? 1 : 0)
@@ -172,8 +182,8 @@ struct DynamicIslandView: View {
     /// settings, where `mode.app` is already nil).
     private var beatPulseActive: Bool {
         guard settings.pulseToBeat,
-              controller.mode.app == .music,
-              !controller.mode.isExpanded else { return false }
+              mode.app == .music,
+              !mode.isExpanded else { return false }
         return controller.nowPlaying?.isPlaying == true
     }
 
@@ -219,12 +229,12 @@ struct DynamicIslandView: View {
     /// True when the main island is the Timers app and one of its countdowns is
     /// ringing — drives the flashing red ring around the whole island.
     private var mainIslandRinging: Bool {
-        controller.mode.app == .timers && controller.timerManager.isRinging
+        mode.app == .timers && controller.timerManager.isRinging
     }
 
     /// Accent for the glow, following whichever app fills the main island.
     private var mainAccent: Color {
-        switch controller.mode.app {
+        switch mode.app {
         case .calendar:
             return IslandApp.calendar.tint
         case .music:
@@ -247,7 +257,7 @@ struct DynamicIslandView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch controller.mode {
+        switch mode {
         case .idle:
             EmptyView()
         case .compact(let app):

@@ -44,8 +44,14 @@ final class DynamicIslandController: ObservableObject {
         return MusicLibraryStore(library: library)
     }()
 
-    /// Whether the pointer is currently over the island.
-    @Published private(set) var isHovered: Bool = false
+    /// Which display's island the pointer is over (nil = none). Per-display so that,
+    /// with the island cloned on several screens, only the one under the cursor
+    /// expands. `isHovered` is the "any island" convenience.
+    @Published private(set) var hoveredDisplay: CGDirectDisplayID?
+    var isHovered: Bool { hoveredDisplay != nil }
+    /// The display a HUD (brightness/volume) rides on — the cursor's screen, so the
+    /// readout appears only there. Set by `presentHUD`.
+    private(set) var hudDisplay: CGDirectDisplayID?
 
     /// Whether the volume bar is revealed (pointer over the volume zone).
     @Published private(set) var volumeRevealed: Bool = false
@@ -75,8 +81,11 @@ final class DynamicIslandController: ObservableObject {
     /// window controller passes clicks through whenever the pointer isn't actually
     /// over the card. Toggled by the thumbtack/✕ affordance in the card's
     /// top-right corner.
-    @Published private(set) var pinned: Bool =
-        ProcessInfo.processInfo.environment["DI_FORCE_PIN"] == "1"
+    /// The display whose island is pinned open (nil = not pinned). Per-display so a
+    /// pin holds only that screen's card open. `pinned` is the "any" convenience.
+    @Published private(set) var pinnedDisplay: CGDirectDisplayID? =
+        ProcessInfo.processInfo.environment["DI_FORCE_PIN"] == "1" ? CGMainDisplayID() : nil
+    var pinned: Bool { pinnedDisplay != nil }
 
     /// Whether the pointer is over the top-right corner zone where the pin
     /// affordance lives. Set by the window controller's hover poll; reveals the
@@ -347,23 +356,23 @@ final class DynamicIslandController: ObservableObject {
 
     // MARK: Derived presentation
 
-    /// Derived presentation mode.
-    var mode: IslandMode {
-        // The HUD sits above everything: a hardware key-press is an immediate
-        // intent that briefly owns the island, then auto-dismisses.
-        if let hud = activeHUD { return .hud(hud) }
-        // Popups sit just below: while one is present it owns the main island
-        // regardless of hover, app priority, or selection.
+    /// Presentation mode for the island on `displayID`. Multi-display: the HUD rides
+    /// only on the display it targets (the cursor's), and hover/pin expansion is
+    /// per-display (only the screen you're interacting with expands); popups and the
+    /// ambient compact state clone onto every screen.
+    func mode(for displayID: CGDirectDisplayID) -> IslandMode {
+        // The HUD sits above everything, but on ITS display only.
+        if let hud = activeHUD, displayID == (hudDisplay ?? CGMainDisplayID()) { return .hud(hud) }
+        // Popups (notifications / live activities) mirror on every display.
         if let popup = activePopup { return .popup(popup) }
-        let hovered = isHovered || pinned || forceExpanded || forceSettings || isEditing
-        if !hovered {
+        let expanded = hoveredDisplay == displayID || pinnedDisplay == displayID
+            || forceExpanded || forceSettings
+        if !expanded {
             // A debug-forced app pins the compact pill too (so DI_FORCE_APP can
-            // exercise an app that isn't otherwise in the active hierarchy, e.g.
-            // Weather). In production `forcedApp` is nil and this is a no-op.
+            // exercise an app that isn't otherwise in the active hierarchy).
             if let forced = forcedApp { return .compact(forced) }
             // A transient live activity (e.g. the onboarding hint) owns the compact
-            // slot while it's up — but only when NOT hovered, so hovering still
-            // opens the island (it's already in the `!hovered` branch).
+            // slot while it's up — but only when NOT expanded here.
             if let activity = liveActivity { return .liveActivity(activity) }
             guard let top = topApp else { return .idle }
             return .compact(top)
@@ -372,11 +381,21 @@ final class DynamicIslandController: ObservableObject {
         return .expanded(displayedApp)
     }
 
+    /// The "focused" mode — the display the user is interacting with (hovered / pinned
+    /// / the HUD's, else main). Used by the window controller and the accent glow.
+    var mode: IslandMode { mode(for: hoveredDisplay ?? pinnedDisplay ?? hudDisplay ?? CGMainDisplayID()) }
+
     /// Whether the music volume bar should be shown (real reveal or forced).
     var volumeBarVisible: Bool { volumeRevealed || forceVolume }
 
-    /// Geometry for the current mode.
-    var geometry: IslandGeometry {
+    /// Geometry for the island on `displayID` (its own per-display mode).
+    func geometry(for displayID: CGDirectDisplayID) -> IslandGeometry { geometry(for: mode(for: displayID)) }
+
+    /// Geometry for the focused display's mode.
+    var geometry: IslandGeometry { geometry(for: mode) }
+
+    /// Geometry for a specific mode.
+    private func geometry(for mode: IslandMode) -> IslandGeometry {
         let c = configuration
         switch mode {
         case .idle:
@@ -538,10 +557,10 @@ final class DynamicIslandController: ObservableObject {
         islandExtensions.remove(at: idx)
     }
 
-    func setHovered(_ hovered: Bool) {
-        guard isHovered != hovered else { return }
-        isHovered = hovered
-        if hovered {
+    func setHovered(_ display: CGDirectDisplayID?) {
+        guard hoveredDisplay != display else { return }
+        hoveredDisplay = display
+        if display != nil {
             // A glance is enough to acknowledge a ringing timer: silence and
             // clear any that have fired the moment the pointer arrives.
             timerManager.dismissRinging()
@@ -567,11 +586,13 @@ final class DynamicIslandController: ObservableObject {
     /// so a change in the active hierarchy can't swap it out; unpinning while the
     /// pointer is away collapses the island back to normal.
     func togglePin() {
-        pinned.toggle()
-        if pinned {
+        if pinnedDisplay != nil {
+            pinnedDisplay = nil
+            if !isHovered { resetTransientState() }
+        } else {
+            // Pin the island on the display currently being interacted with.
+            pinnedDisplay = hoveredDisplay ?? CGMainDisplayID()
             if selectedApp == nil { selectedApp = displayedApp }
-        } else if !isHovered {
-            resetTransientState()
         }
     }
 
@@ -801,7 +822,8 @@ final class DynamicIslandController: ObservableObject {
     /// Present (or refresh) the volume/brightness HUD, taking over the island.
     /// Each call resets the auto-dismiss timer so holding a key keeps it up; it
     /// fades out `hudDuration` after the last adjustment.
-    func presentHUD(_ hud: SystemHUD, direction: Int = 0) {
+    func presentHUD(_ hud: SystemHUD, direction: Int = 0, onDisplay display: CGDirectDisplayID? = nil) {
+        hudDisplay = display ?? CGMainDisplayID()
         activeHUD = hud
         // Kick the bubble in the direction of the change for a fluid feel.
         hudNudge = HUDNudge(token: hudNudge.token &+ 1, direction: direction)
