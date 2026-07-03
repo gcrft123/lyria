@@ -28,6 +28,10 @@ DerivedData/
 *.swp
 *~
 
+# Local agent scratch (diagnostic/cycle scripts + their logs)
+_agent_*.command
+_agent_*.log
+
 # Local secrets / signing material (never commit these)
 *.p12
 *.cer
