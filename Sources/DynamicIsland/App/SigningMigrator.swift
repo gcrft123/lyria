@@ -32,7 +32,8 @@ final class SigningMigrator {
 
     /// The Developer ID team the migrated build must be signed by. Pinned so this
     /// path can only ever install *our* signed app, never an arbitrary bundle.
-    private static let expectedTeamID = "2R2HK79MH6"
+    /// `nonisolated` because the signature check runs off the main actor.
+    nonisolated static let expectedTeamID = "2R2HK79MH6"
 
     /// Whether this build predates the identity change and therefore owns the
     /// update path. False for any Developer ID build, which retires the migrator.
