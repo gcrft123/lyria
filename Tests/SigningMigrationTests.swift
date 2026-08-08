@@ -111,15 +111,19 @@ private func testEdDSAVerification() {
 
 // MARK: Developer ID pinning
 
-/// The self-signed build must read as transitional and the Developer ID build
-/// must not — that boolean is what makes the migrator retire itself.
+/// `isDeveloperIDSigned` decides whether the migrator installs a bundle at all,
+/// and whether it retires itself. Rather than assume how the local build was
+/// signed — `./build.sh` self-signs, `release.sh` with DI_DEVID_IDENTITY does
+/// not — cross-check our SecStaticCode + requirement logic against what the
+/// system's own `codesign` reports for whatever bundle happens to be there.
 @MainActor
 private func testDeveloperIDRequirement() {
-    let root = repoRoot()
-    let selfSigned = root.appendingPathComponent(".build/Lyria.app")
-    if FileManager.default.fileExists(atPath: selfSigned.path) {
-        expect(!SigningMigrator.isDeveloperIDSigned(bundleURL: selfSigned),
-               "the local self-signed build is NOT accepted as Developer ID")
+    let build = repoRoot().appendingPathComponent(".build/Lyria.app")
+    if FileManager.default.fileExists(atPath: build.path) {
+        let systemTeam = teamIdentifier(of: build)
+        let shouldAccept = (systemTeam == SigningMigrator.expectedTeamID)
+        expectEqual(SigningMigrator.isDeveloperIDSigned(bundleURL: build), shouldAccept,
+                    "agrees with codesign for the local build (team \(systemTeam ?? "none"))")
     } else {
         skip("Developer ID check: no .build/Lyria.app (run ./build.sh first)")
     }
@@ -128,6 +132,33 @@ private func testDeveloperIDRequirement() {
     expect(!SigningMigrator.isDeveloperIDSigned(
         bundleURL: URL(fileURLWithPath: "/usr/bin/true-does-not-exist")),
            "a missing bundle is not Developer ID signed")
+
+    // An Apple-signed system app is validly signed and anchored to Apple, but
+    // carries a different team — it must still be refused. This is what stops the
+    // requirement from degenerating into "is signed by anyone".
+    let systemApp = URL(fileURLWithPath: "/System/Applications/Calculator.app")
+    if FileManager.default.fileExists(atPath: systemApp.path) {
+        expect(!SigningMigrator.isDeveloperIDSigned(bundleURL: systemApp),
+               "an Apple-signed app from another team is refused")
+    }
+}
+
+/// The Team ID `codesign` reports for a bundle, or nil if unsigned / not set.
+private func teamIdentifier(of bundle: URL) -> String? {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+    task.arguments = ["-dv", "--verbose=2", bundle.path]
+    let pipe = Pipe()
+    task.standardError = pipe          // codesign writes this to stderr
+    task.standardOutput = FileHandle.nullDevice
+    guard (try? task.run()) != nil else { return nil }
+    let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    task.waitUntilExit()
+    for line in text.split(separator: "\n") where line.hasPrefix("TeamIdentifier=") {
+        let value = String(line.dropFirst("TeamIdentifier=".count))
+        return value == "not set" ? nil : value
+    }
+    return nil
 }
 
 // MARK: The bundle swap
