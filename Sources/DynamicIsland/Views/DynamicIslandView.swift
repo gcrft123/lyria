@@ -260,6 +260,9 @@ struct DynamicIslandView: View {
             .onPreferenceChange(NotchShellMetricsKey.self) { metrics in
                 notchContentWidth = metrics.width
                 notchShellOffset = metrics.offset
+                // Hand the drawn size to the controller so the hover hitbox tracks
+                // the silhouette the user can actually see.
+                controller.setNotchShellMetrics(metrics, for: displayID)
             }
             .background(alignment: .top) {
                 sideIslandsLayer(islandWidth: shellWidth, topInset: 0, notch: notch)

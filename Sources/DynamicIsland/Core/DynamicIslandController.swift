@@ -415,6 +415,28 @@ final class DynamicIslandController: ObservableObject {
         return .notch(notch)
     }
 
+    /// The flanking notch silhouette as ACTUALLY DRAWN, per display: its measured
+    /// width and centring offset, reported by the view once its lobes have laid out.
+    ///
+    /// `notchShellGeometry` returns the WIDEST the flanking shell could be (both
+    /// lobes at `notchLobeWidth`); the view instead hugs its content and shifts to
+    /// keep the notch gap centred. Hit-testing has to follow the drawn shape, not
+    /// the upper bound, or the hover zone reaches far past the visible island — and
+    /// sits off-centre whenever one lobe is empty. Not `@Published`: it's written
+    /// from a layout pass and only read outside SwiftUI (the hover poll).
+    private var notchShellMetrics: [CGDirectDisplayID: NotchShellMetrics] = [:]
+
+    func setNotchShellMetrics(_ metrics: NotchShellMetrics, for displayID: CGDirectDisplayID) {
+        notchShellMetrics[displayID] = metrics
+    }
+
+    /// The drawn flanking silhouette for `displayID`, or `nil` before the first
+    /// layout reports one (callers fall back to `notchShellGeometry`).
+    func drawnNotchShell(for displayID: CGDirectDisplayID) -> NotchShellMetrics? {
+        guard let m = notchShellMetrics[displayID], m.width > 0 else { return nil }
+        return m
+    }
+
     /// In notch mode, whether this mode's content drops BELOW the notch as a
     /// full-width card (a black "neck" at the top, content clear of the notch:
     /// expanded / settings / HUD / banner notification) versus FLANKS the notch in

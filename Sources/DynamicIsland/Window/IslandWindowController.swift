@@ -52,6 +52,8 @@ final class IslandWindowController: NSObject {
     private func scrollThreshold(precise: Bool) -> CGFloat { precise ? 28 : 1 }
     private var scrollMonitor: Any?
     private let scrollDebug = ProcessInfo.processInfo.environment["DI_DEBUG_SCROLL"] == "1"
+    private let hoverDebug = ProcessInfo.processInfo.environment["DI_DEBUG_HOVER"] == "1"
+    private var lastHoverLog = ""
     private var cancellables: Set<AnyCancellable> = []
 
     init(controller: DynamicIslandController) {
@@ -279,6 +281,8 @@ final class IslandWindowController: NSObject {
             cursorDisplay.flatMap { id in panels[id].map { (id, $0) } }
         activeDisplayID = active?.id
 
+        if hoverDebug, let active { logHoverZone(active.panel, displayID: active.id) }
+
         // Only the panel under the cursor may capture events; the rest pass through.
         for (id, panel) in panels where id != active?.id { panel.ignoresMouseEvents = true }
 
@@ -403,32 +407,65 @@ final class IslandWindowController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + exitGrace, execute: work)
     }
 
-    /// A panel's island hitbox in screen coordinates. The floating blob hangs
-    /// `topInset` below the screen top (shadow room) but its hitbox stretches to the
-    /// very top edge so slamming the pointer up triggers it. A notch island is
-    /// flush to the top edge, so its hitbox is the morphed silhouette itself —
-    /// which when idle is just the physical notch.
+    /// A panel's island hitbox in screen coordinates, plus `padding` of forgiveness.
+    /// The floating blob hangs `topInset` below the screen top (shadow room) but its
+    /// hitbox stretches to the very top edge so slamming the pointer up triggers it.
+    /// A notch island is flush to the top edge, so its hitbox is the silhouette as
+    /// drawn — the bare cut-out when idle, the measured lobes when flanking, the
+    /// card when dropped below.
     private func islandRect(for panel: IslandPanel, displayID: CGDirectDisplayID, inflatedBy padding: CGFloat = 0) -> NSRect {
         let frame = panel.frame
-        let size: CGSize
+        var size: CGSize
         let bottomY: CGFloat
-        var hPad = padding
+        // How far the drawn shape sits from the panel's centre. Only the flanking
+        // notch silhouette shifts; everything else is centred.
+        var centerOffset: CGFloat = 0
         switch controller.renderStyle(for: displayID) {
         case .floating:
             size = controller.geometry(for: displayID).size
             bottomY = frame.maxY - configuration.topInset - size.height
         case .notch(let notch):
             size = controller.notchShellGeometry(for: displayID, notch: notch).size
+            // A below-notch card is drawn at the geometry width, centred. A FLANKING
+            // silhouette is not: the view hugs its measured lobes and shifts to keep
+            // the notch gap centred, so the geometry width (both lobes at their max)
+            // can overshoot the drawn shape by hundreds of points, and a one-sided
+            // activity leaves the zone off-centre. Track what's on screen instead.
+            if !controller.notchDropsBelow(controller.mode(for: displayID)),
+               let drawn = controller.drawnNotchShell(for: displayID) {
+                size.width = drawn.width
+                centerOffset = drawn.offset
+            }
             bottomY = frame.maxY - size.height  // flush to the top edge
-            // Reach out to the sides so approaching the notch from either side
-            // summons the island, not only a pointer landing dead-centre.
-            hPad += configuration.notchApproachWidth
         }
-        let rect = NSRect(x: frame.midX - size.width / 2,
+        let rect = NSRect(x: frame.midX + centerOffset - size.width / 2,
                           y: bottomY,
                           width: size.width,
                           height: frame.maxY - bottomY)
-        return rect.insetBy(dx: -hPad, dy: -padding)
+        return rect.insetBy(dx: -padding, dy: -padding)
+    }
+
+    /// `DI_DEBUG_HOVER=1` prints the activation zone whenever it changes, so the
+    /// hitbox can be checked against the silhouette actually on screen.
+    private func logHoverZone(_ panel: IslandPanel, displayID: CGDirectDisplayID) {
+        let rect = islandRect(for: panel, displayID: displayID, inflatedBy: activeHoverPadding)
+        let line: String
+        switch controller.renderStyle(for: displayID) {
+        case .floating:
+            line = String(format: "floating zone x=%.0f…%.0f (w=%.0f)",
+                          rect.minX, rect.maxX, rect.width)
+        case .notch(let notch):
+            let geo = controller.notchShellGeometry(for: displayID, notch: notch).size.width
+            // Only the flanking silhouette reports measured metrics; a below-notch
+            // card is drawn at the geometry width, centred.
+            let drawn = controller.drawnNotchShell(for: displayID)
+                .map { String(format: "%.0f offset=%+.0f", $0.width, $0.offset) } ?? "none (card)"
+            line = String(format: "notch zone x=%.0f…%.0f (w=%.0f) drawn=%@ geometryMax=%.0f pad=%.0f",
+                          rect.minX, rect.maxX, rect.width, drawn, geo, activeHoverPadding)
+        }
+        guard line != lastHoverLog else { return }
+        lastHoverLog = line
+        FileHandle.standardError.write(Data(("[hover] " + line + "\n").utf8))
     }
 
     /// Whether the given display currently renders in notch-integrated mode.

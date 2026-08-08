@@ -268,11 +268,6 @@ struct IslandConfiguration {
     var notchMoreDotSize: CGFloat = 8
     var notchMoreDotStroke: CGFloat = 1.5
 
-    /// How far to each side of the notch silhouette the hover/activation zone
-    /// reaches, so approaching the notch from the sides summons the island rather
-    /// than only a pointer landing dead-centre. (Hit-testing only — invisible.)
-    var notchApproachWidth: CGFloat = 130
-
     // MARK: Panel canvas
 
     /// The hosting panel is larger than the pill so that expanded states, the
