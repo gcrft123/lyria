@@ -3,20 +3,29 @@
     <channel>
         <title>Lyria</title>
         <item>
+            <title>1.0.0</title>
+            <pubDate>Sat, 08 Aug 2026 13:27:25 -0500</pubDate>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria-1.0.0.zip" length="4278383" type="application/octet-stream" sparkle:edSignature="XXx//cR+vRVcynK8d1EXl4s9iDFrOcka3zo/fO+qw3An+V2RsGLLO0/8tFk/69JArMEjvuvCnvpQ9i7TkCa+Dg=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria8-7.delta" sparkle:deltaFrom="7" length="21862" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="aypKYZ9j+Nu3N07iHn17ny7YfZWP3/qc00Ud/Tjn8/idCJj0LGS7whDSwlZBuSseFxZnFzsj60T5UAMNGmGrBA=="/>
+                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria8-6.delta" sparkle:deltaFrom="6" length="298118" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="0cDZtKvcggsaHK27RsqL5iaPjGuuUCbbA6EAvw9Z3EWDAO3WLcvnECD9Cntz7EB5dkwIHuO/HnHSXTDR4Hf+AA=="/>
+                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria8-5.delta" sparkle:deltaFrom="5" length="459394" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="ZGXuNoW5cGfBjsqD7vIVhHS9HzPoEkowmyxYw/ygsOw/n2Ow41mmU+F8K7lRBUw6vVHN38JJJyLf9uSIByxTCg=="/>
+                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria8-4.delta" sparkle:deltaFrom="4" length="498418" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="1nwMsm6c047lc7WClJOnNcx7vmf3SmXBeKCihzTyY7IGYahGTy9bFlgCJ57Ifo+646mY/mXRWWEThhzzzyF1Bw=="/>
+                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria8-3.delta" sparkle:deltaFrom="3" length="563154" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="Lm7HCD5j7KD5rDWpZMgY9qyk8oq4gDKDZ+6IlRrcktFNSwHTHAqwxEFuFk4M7g1ScpLyJmMnO6HNG931VzDrAw=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>0.2.1</title>
-            <pubDate>Sat, 08 Aug 2026 09:58:22 -0500</pubDate>
+            <pubDate>Sat, 08 Aug 2026 10:24:53 -0500</pubDate>
             <sparkle:version>7</sparkle:version>
             <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria-0.2.1.zip" length="4244362" type="application/octet-stream" sparkle:edSignature="tqS+9xqM+Afp6JpbEZ4uN9SHB1atwXNaDPfufcFPvTsosJs6dkl8H9GtYfrqnoYayCzsNCKD2p3d18N+oeceDw=="/>
-            <sparkle:deltas>
-                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria7-6.delta" sparkle:deltaFrom="6" length="289298" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="jdbALQ6f3Bh0lGrpNiNos4/9UL1mKwtkAdnq+sZGfK9lujBRGRrB5HgHLirYeJ8VPrEH1areBZjBJNb6Nx5VAA=="/>
-                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria7-5.delta" sparkle:deltaFrom="5" length="451602" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="us+DN+AqY8Dr4nB5kYtwj2OGEcbxbWDP/Td8ybyOJ8eDJN5wU+ODR9FT1Kr+i3ahtzD2w7oYmZgvGVKoPhrhCA=="/>
-                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria7-4.delta" sparkle:deltaFrom="4" length="489370" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="WARydV1sNu7ZqfuXIy044xQqIpWg7WJ2wqdbd+FGG3MGatcNxXK6ho4tcratWR1aCwnn2ZmI0O+C2Ncbu0CaAg=="/>
-                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria7-3.delta" sparkle:deltaFrom="3" length="556950" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="3gwX3B9WikmmOcfhxNJmtG5oSegUms8HHAa4ixcDhoutrf5BwOUOppsBedo7+WEf51kz2vXto/wWP2y5Ce4jDg=="/>
-                <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria7-2.delta" sparkle:deltaFrom="2" length="764646" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="peM3r2GLoK0M9CJksULZCc/pK1HRoDAajUHnUoY3TgCusQcDZ1hkVMo5I7xKIxl0+Qc06solGoaFfAqDakRCCQ=="/>
-            </sparkle:deltas>
+            <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria-0.2.1.zip" length="4244362" type="application/octet-stream" sparkle:edSignature="tqS+9xqM+Afp6JpbEZ4uN9SHB1atwXNaDPfufcFPvTsosJs6dkl8H9GtYfrqnoYayCzsNCKD2p3d18N+oeceDw=="/>
         </item>
         <item>
             <title>0.2.0</title>
@@ -25,16 +34,7 @@
             <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria-0.2.0.zip" length="4216302" type="application/octet-stream" sparkle:edSignature="pY/bXBll+tt267uacM9mfGMRjhmjES623zkEO7C5n6u8yyBx4kAB1ZzBGa2popWYQ6oyUlD4f3vPrf+Y5PkhBQ=="/>
-        </item>
-        <item>
-            <title>0.1.4</title>
-            <pubDate>Sat, 08 Aug 2026 09:56:59 -0500</pubDate>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/gcrft123/lyria/releases/download/v0.2.1/Lyria-0.1.4.zip" length="4096036" type="application/octet-stream" sparkle:edSignature="QaWs8QnhbdoCIjhjFQVmhA1nzr4yjAmArZ2WqDzmRnVos4rEqbgCrx0qzko2yCIZK5GvoGOwrFCLm+FtEoFSBg=="/>
+            <enclosure url="https://github.com/gcrft123/lyria/releases/download/v1.0.0/Lyria-0.2.0.zip" length="4216302" type="application/octet-stream" sparkle:edSignature="pY/bXBll+tt267uacM9mfGMRjhmjES623zkEO7C5n6u8yyBx4kAB1ZzBGa2popWYQ6oyUlD4f3vPrf+Y5PkhBQ=="/>
         </item>
     </channel>
 </rss>
