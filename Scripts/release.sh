@@ -9,12 +9,17 @@
 #      result is Hardened-Runtime + entitled + timestamped (notarizable). Without
 #      it you get the local self-signed build — fine for testing the update flow,
 #      but Gatekeeper will warn on other Macs.
-#   2. Zips the .app into dist/Lyria-<version>.zip (ditto, --keepParent).
-#   3. Runs Sparkle's generate_appcast over dist/, which EdDSA-signs every archive
+#   2. Notarizes the Developer ID build with Apple and staples the ticket into
+#      the bundle, so Gatekeeper clears it on a fresh download. Needs credentials
+#      stored once via `xcrun notarytool store-credentials <profile>` (profile
+#      name from DI_NOTARY_PROFILE, default "notarytool"). Skipped for a
+#      self-signed build, or with DI_SKIP_NOTARIZE=1.
+#   3. Zips the (stapled) .app into dist/Lyria-<version>.zip (ditto, --keepParent).
+#   4. Runs Sparkle's generate_appcast over dist/, which EdDSA-signs every archive
 #      with the private key generate_keys put in your login keychain, writes the
 #      enclosure's sparkle:edSignature, and builds binary deltas from older
 #      versions still sitting in dist/.
-#   4. Copies the resulting appcast.xml into docs/ so GitHub Pages serves it at
+#   5. Copies the resulting appcast.xml into docs/ so GitHub Pages serves it at
 #      the SUFeedURL (https://gcrft123.github.io/lyria/appcast.xml).
 #
 # After running:
@@ -70,6 +75,42 @@ fi
 "$ROOT/build.sh"
 
 [[ -d "$APP_BUNDLE" ]] || { echo "    build failed: $APP_BUNDLE missing" >&2; exit 1; }
+
+# Notarize + staple, so Gatekeeper clears the app on a fresh download instead of
+# holding it behind "Apple could not verify…". Only meaningful for a Developer ID
+# build (Apple won't notarize a self-signed one), and only possible with stored
+# credentials: `xcrun notarytool store-credentials <profile>`.
+#
+# The ticket has to be stapled INTO the bundle before it is archived, so this runs
+# between the build and the zip. Submission itself needs its own throwaway zip.
+# Set DI_SKIP_NOTARIZE=1 to cut a Developer ID build without the (slow) round trip.
+NOTARY_PROFILE="${DI_NOTARY_PROFILE:-notarytool}"
+if [[ -n "${DI_DEVID_IDENTITY:-}" && "${DI_SKIP_NOTARIZE:-}" != "1" ]]; then
+	if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+		echo "==> Notarizing (profile: $NOTARY_PROFILE) — this takes a few minutes"
+		NOTARIZE_ZIP="$(mktemp -d)/Lyria-notarize.zip"
+		ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$NOTARIZE_ZIP"
+		if ! xcrun notarytool submit "$NOTARIZE_ZIP" \
+			--keychain-profile "$NOTARY_PROFILE" --wait --timeout 30m; then
+			echo "    notarization FAILED — run 'xcrun notarytool log <id> --keychain-profile $NOTARY_PROFILE'" >&2
+			exit 1
+		fi
+		rm -rf "$(dirname "$NOTARIZE_ZIP")"
+		echo "==> Stapling the ticket into the bundle"
+		xcrun stapler staple "$APP_BUNDLE" || { echo "    stapling failed" >&2; exit 1; }
+		# Prove it: spctl is what Gatekeeper actually consults on first launch.
+		if spctl -a -vv -t execute "$APP_BUNDLE" 2>&1 | grep -q "accepted"; then
+			echo "    Gatekeeper: accepted (notarized + stapled)"
+		else
+			echo "    Gatekeeper still rejects the stapled bundle:" >&2
+			spctl -a -vv -t execute "$APP_BUNDLE" >&2 2>&1 || true
+			exit 1
+		fi
+	else
+		echo "    ⚠️  no notary credentials for profile '$NOTARY_PROFILE' — shipping UNNOTARIZED."
+		echo "       Gatekeeper will hold a fresh download. Fix: xcrun notarytool store-credentials $NOTARY_PROFILE"
+	fi
+fi
 
 echo "==> Archiving → $ARCHIVE"
 mkdir -p "$DIST"
