@@ -62,7 +62,7 @@ final class WiFiProvider: NSObject, IslandContentProvider, CWEventDelegate {
             try client.startMonitoringEvent(with: .ssidDidChange)
         } catch {
             FileHandle.standardError.write(Data(
-                "DynamicIsland: Wi-Fi monitor couldn't start (\(error.localizedDescription)).\n".utf8))
+                "Lyria: Wi-Fi monitor couldn't start (\(error.localizedDescription)).\n".utf8))
         }
     }
 

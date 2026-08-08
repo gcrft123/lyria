@@ -85,7 +85,7 @@ final class AirDropProvider: IslandContentProvider {
             logTask = task
         } catch {
             FileHandle.standardError.write(Data(
-                "DynamicIsland: AirDrop monitor couldn't start `log stream` (\(error.localizedDescription)).\n".utf8))
+                "Lyria: AirDrop monitor couldn't start `log stream` (\(error.localizedDescription)).\n".utf8))
         }
     }
 

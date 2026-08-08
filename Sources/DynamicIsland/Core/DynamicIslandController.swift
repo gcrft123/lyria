@@ -176,7 +176,7 @@ final class DynamicIslandController: ObservableObject {
     private let forceVolume = ProcessInfo.processInfo.environment["DI_FORCE_VOLUME"] == "1"
     private let forceSettings = ProcessInfo.processInfo.environment["DI_FORCE_SETTINGS"] == "1"
     /// DI_FORCE_NOMUSIC=1 suppresses now-playing (to exercise the music
-    /// "Nothing Playing" placeholder without disturbing real playback).
+    /// "Nothing playing" placeholder without disturbing real playback).
     private let forceNoMusic = ProcessInfo.processInfo.environment["DI_FORCE_NOMUSIC"] == "1"
     /// DI_FORCE_POPUP=1 seeds a sample popup at launch (to exercise the popup
     /// takeover / hover-grow visuals).
@@ -808,9 +808,9 @@ final class DynamicIslandController: ObservableObject {
         let line: String
         let symbol: String
         switch settings.expandTrigger {
-        case .hover:  line = "Hover me to open";   symbol = "hand.point.up.left.fill"
-        case .click:  line = "Click me to open";   symbol = "hand.tap.fill"
-        case .scroll: line = "Scroll down on me";  symbol = "arrow.down"
+        case .hover:  line = "Hover to open";        symbol = "hand.point.up.left.fill"
+        case .click:  line = "Click to open";        symbol = "hand.tap.fill"
+        case .scroll: line = "Scroll down to open";  symbol = "arrow.down"
         }
         presentLiveActivity(
             LiveActivity(id: "onboarding-hint", symbol: symbol, title: line, accent: Palette.indigo),

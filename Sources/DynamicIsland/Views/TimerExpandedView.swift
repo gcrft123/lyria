@@ -25,7 +25,7 @@ struct TimerExpandedView: View {
                 // the header; if the card is momentarily taller (e.g. mid-morph
                 // when switching from a bigger app) the text stays centered
                 // instead of clinging to the top with a void beneath it.
-                Text("No timers yet — add one above")
+                Text("No timers yet. Add one above.")
                     .font(Typography.footnote)
                     .foregroundStyle(Palette.textTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)

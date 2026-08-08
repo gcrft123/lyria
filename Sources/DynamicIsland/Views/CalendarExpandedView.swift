@@ -187,7 +187,7 @@ struct CalendarExpandedView: View {
 
             let groups = calendar.upcomingGroupedByDay(from: agendaAnchor)
             if !calendar.authorized && calendar.events.isEmpty {
-                emptyState("Calendar access needed", "Grant access in System Settings ▸ Privacy")
+                emptyState("Calendar access needed", "Turn on Lyria in Privacy & Security ▸ Calendars")
             } else if groups.isEmpty {
                 emptyState("Nothing coming up", "Events appear here as they're added")
             } else {

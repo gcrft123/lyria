@@ -39,7 +39,7 @@ struct PermissionsAct: View {
 
             Spacer(minLength: Spacing.zero)
 
-            Text("Everything stays on your Mac — grant only what you want.")
+            Text("Everything stays on your Mac. Grant only what you want.")
                 .font(Typography.footnote).foregroundStyle(Palette.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .center)
         }

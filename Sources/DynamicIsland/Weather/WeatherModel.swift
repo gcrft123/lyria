@@ -59,7 +59,7 @@ struct WeatherCondition: Equatable {
     var description: String {
         switch kind {
         case .clear:        return isDay ? "Sunny" : "Clear"
-        case .partlyCloudy: return isDay ? "Partly Cloudy" : "Partly Cloudy"
+        case .partlyCloudy: return "Partly Cloudy"
         case .cloudy:       return "Cloudy"
         case .fog:          return "Fog"
         case .drizzle:      return "Drizzle"

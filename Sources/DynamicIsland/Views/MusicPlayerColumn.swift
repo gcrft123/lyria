@@ -58,7 +58,7 @@ struct MusicPlayerColumn: View {
             Image(systemName: "music.note")
                 .font(.system(size: IconSize.xxxl, weight: .semibold))
                 .foregroundStyle(Palette.textTertiary)
-            Text("Nothing Playing")
+            Text("Nothing playing")
                 .font(Typography.subheadline)
                 .foregroundStyle(Palette.textSecondary)
             Text("Start a song in Apple Music")

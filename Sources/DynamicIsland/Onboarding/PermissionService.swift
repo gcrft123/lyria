@@ -48,12 +48,12 @@ enum OnboardingPermission: String, CaseIterable, Identifiable {
     /// What the feature does — shown as the reason for the ask.
     var reason: String {
         switch self {
-        case .accessibility: return "Fan out every open window with ⌥Tab, and replace the volume HUD."
-        case .music: return "Mirror what's playing and let you control it from the notch."
+        case .accessibility: return "Fan out every open window with ⌥Tab, and show volume and brightness on the island."
+        case .music: return "Mirror what's playing and let you control it from the island."
         case .audio: return "Pulse the glow to the beat, and tune any app's EQ."
-        case .calendar: return "Surface your next event and a live countdown before it starts."
+        case .calendar: return "Show your next event and a live countdown before it starts."
         case .location: return "Show the local weather for where you are."
-        case .fullDisk: return "Optional — replace system notification banners with the island's."
+        case .fullDisk: return "Optional. Show notification banners on the island instead of the usual ones."
         case .bluetooth: return "Show a banner when your devices connect."
         }
     }

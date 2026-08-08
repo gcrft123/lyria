@@ -31,7 +31,7 @@ enum CrashReporter {
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
 
-        var text = "Lyria uncaught exception — \(timestamp)\n"
+        var text = "Lyria uncaught exception at \(timestamp)\n"
         text += "Version \(version) (\(build)), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)\n"
         text += "\(exception.name.rawValue): \(exception.reason ?? "(no reason)")\n\n"
         text += exception.callStackSymbols.joined(separator: "\n")

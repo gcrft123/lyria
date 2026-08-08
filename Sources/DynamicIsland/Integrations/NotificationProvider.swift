@@ -233,7 +233,7 @@ final class NotificationProvider: NotificationIslandProvider {
         guard !didWarnNoAccess else { return }
         didWarnNoAccess = true
         FileHandle.standardError.write(Data(
-            "DynamicIsland: notification mirroring needs Full Disk Access. Opening System Settings ▸ Privacy & Security ▸ Full Disk Access — turn on DynamicIsland there, then relaunch.\n".utf8))
+            "Lyria: notification mirroring needs Full Disk Access. Opening System Settings ▸ Privacy & Security ▸ Full Disk Access. Turn on Lyria there, then relaunch.\n".utf8))
         // The read above has already registered this app in the Full Disk Access
         // list (toggled off), so jump the user straight to that pane — no need to
         // hunt for the app bundle, which lives in the hidden `.build/` folder.
@@ -242,8 +242,8 @@ final class NotificationProvider: NotificationIslandProvider {
         }
         controller?.presentPopup(IslandPopup(
             id: "notifications-need-fda",
-            title: "Enable notification mirroring",
-            message: "Turn on DynamicIsland in Full Disk Access, then relaunch",
+            title: "Full Disk Access needed",
+            message: "Turn on Lyria in Full Disk Access, then relaunch",
             icon: .symbol("bell.badge"),
             accent: .orange,
             autoDismissAfter: 8))

@@ -321,7 +321,7 @@ private struct MusicMini: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .buttonStyle(.island)
         } else {
-            DashEmpty(symbol: "music.note", text: "Nothing Playing")
+            DashEmpty(symbol: "music.note", text: "Nothing playing")
         }
     }
 
@@ -432,7 +432,7 @@ private struct MusicRow: View {
             }
             .foregroundStyle(Palette.textPrimary)
         } else {
-            DashEmpty(symbol: "music.note", text: "Nothing Playing")
+            DashEmpty(symbol: "music.note", text: "Nothing playing")
         }
     }
 }

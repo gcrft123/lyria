@@ -319,7 +319,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            Text("The island appears on every enabled display; the screen your cursor is on is the one that expands and shows brightness/volume changes. On a Mac with a notch, the island integrates into the notch — turn that off to keep the floating island there instead. At least one display always stays on, and these choices persist even while a display is unplugged.")
+            Text("The island appears on every display you turn on here. Only the screen your cursor is on expands, and that's where brightness and volume changes show up. On a Mac with a notch, turn off Notch integration to keep the floating island instead. One display always stays on, and your choices are remembered while a display is unplugged.")
                 .font(Typography.footnote)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -419,7 +419,7 @@ struct SettingsView: View {
                 Updater.shared.checkForUpdates()
             } label: {
                 HStack(spacing: 0) {
-                    rowLabel("Check for Updates", systemImage: "arrow.down.circle")
+                    rowLabel("Check for updates", systemImage: "arrow.down.circle")
                     Spacer(minLength: Spacing.md)
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: IconSize.md))

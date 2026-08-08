@@ -27,9 +27,9 @@ final class AppSettings: ObservableObject {
         /// One-line description shown under the picker.
         var hint: String {
             switch self {
-            case .hover: return "Opens as soon as the pointer is over the island."
-            case .click: return "Opens when you click the island; move away to close."
-            case .scroll: return "Opens when you scroll down on the island."
+            case .hover: return "Opens as soon as the pointer is over it."
+            case .click: return "Opens when you click it."
+            case .scroll: return "Opens when you scroll down on it."
             }
         }
     }

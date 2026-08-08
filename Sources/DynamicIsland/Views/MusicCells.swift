@@ -111,8 +111,8 @@ private func rowIconButton(_ symbol: String, tint: Color, action: @escaping () -
 
 // MARK: - More menus
 
-/// The ••• menu for a song: Add to (Favorite / Playlist ▸), Play, Shuffle, Go to
-/// Album, Open in Apple Music.
+/// The ••• menu for a song: Add to (Favorite / Playlist ▸), Play, Go to Album,
+/// Open in Apple Music.
 struct SongMenu: View {
     @ObservedObject var store: MusicLibraryStore
     let song: MusicSong
@@ -122,7 +122,7 @@ struct SongMenu: View {
         Menu {
             Menu("Add to") {
                 Button { store.toggleFavorite(song) } label: {
-                    Label(store.isFavorited(song) ? "Favorited" : "Favorite", systemImage: "heart")
+                    Label(store.isFavorited(song) ? "Unfavorite" : "Favorite", systemImage: "heart")
                 }
                 Menu("Playlist") {
                     if store.playlists.isEmpty {
@@ -135,8 +135,10 @@ struct SongMenu: View {
                 }
             }
             Divider()
+            // No "Shuffle" here: there is nothing to shuffle for a single song, and
+            // the item used to run plain `playSong` — a label that promised more
+            // than it did. Shuffling lives on the playlist/album menu below.
             Button { store.playSong(song) } label: { Label("Play", systemImage: "play.fill") }
-            Button { store.playSong(song) } label: { Label("Shuffle", systemImage: "shuffle") }
             Button { onGoToAlbum() } label: { Label("Go to Album", systemImage: "square.stack") }
             Divider()
             Button { store.openInAppleMusic(song) } label: { Label("Open in Apple Music", systemImage: "arrow.up.forward.app") }

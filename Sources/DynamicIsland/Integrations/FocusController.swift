@@ -59,7 +59,7 @@ final class FocusController {
             if wait { task.waitUntilExit() }
         } catch {
             FileHandle.standardError.write(Data(
-                "DynamicIsland: couldn't run Shortcut \"\(shortcutName)\" — create it in the Shortcuts app so the island can hide the system's own banners. (\(error.localizedDescription))\n".utf8))
+                "Lyria: couldn't run Shortcut \"\(shortcutName)\". Create it in the Shortcuts app so the island can hide the system's own banners. (\(error.localizedDescription))\n".utf8))
         }
     }
 }
