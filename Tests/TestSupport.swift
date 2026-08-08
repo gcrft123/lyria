@@ -9,6 +9,7 @@ enum TestState {
     static var passed = 0
     static var failed = 0
     static var failures: [String] = []
+    static var skipped: [String] = []
 }
 
 /// Assert a condition; records pass/fail with a source location on failure.
@@ -30,6 +31,12 @@ func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ label: String = "",
            file: file, line: line)
 }
 
+/// Record a case that couldn't run for want of a build artifact. Reported at the
+/// end so a skipped check is never mistaken for a passing one.
+func skip(_ reason: String) {
+    TestState.skipped.append(reason)
+}
+
 @main
 struct DynamicIslandTests {
     @MainActor
@@ -38,9 +45,14 @@ struct DynamicIslandTests {
         runCalculatorEngineTests()
         runMusicLibraryTests()
         runNotchTests()
+        runSigningMigrationTests()
 
-        let line = "Tests: \(TestState.passed) passed, \(TestState.failed) failed\n"
-        FileHandle.standardError.write(Data(line.utf8))
+        var line = "Tests: \(TestState.passed) passed, \(TestState.failed) failed"
+        if !TestState.skipped.isEmpty { line += ", \(TestState.skipped.count) skipped" }
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+        for reason in TestState.skipped {
+            FileHandle.standardError.write(Data("  ⊘ skipped: \(reason)\n".utf8))
+        }
         for failure in TestState.failures {
             FileHandle.standardError.write(Data("  ✗ \(failure)\n".utf8))
         }

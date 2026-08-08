@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start Sparkle's scheduled background update checks (manual check lives in
         // Settings ▸ General). Skippable for dev/screenshots via DI_DISABLE_UPDATES=1.
         if ProcessInfo.processInfo.environment["DI_DISABLE_UPDATES"] != "1" {
-            _ = Updater.shared
+            Updater.shared.start(controller: controller)
         }
 
         // Hover → expand/collapse.
